@@ -166,6 +166,9 @@ pub struct IggyShard {
     pub(crate) tcp_bound_address: Cell<Option<SocketAddr>>,
 }
 
+// unsafe impl Send for IggyShard {}
+// unsafe impl Sync     for IggyShard {}
+
 impl IggyShard {
     pub fn builder() -> IggyShardBuilder {
         Default::default()
