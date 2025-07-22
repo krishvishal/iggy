@@ -715,6 +715,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "021e862c184ae977658b36c4500f7feac3221ca5da43e3f25bd04ab6c79a29b5"
 dependencies = [
  "axum-core 0.5.2",
+ "axum-macros",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -780,6 +781,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -2272,6 +2284,28 @@ dependencies = [
  "serde_urlencoded",
  "thiserror 2.0.12",
  "url",
+]
+
+[[package]]
+name = "cyper-axum"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "544ea99187b3adfa95f94f41dbc3e0f144a0e0398071ad0c60fb170692d5df6d"
+dependencies = [
+ "axum 0.8.4",
+ "axum-core 0.5.2",
+ "compio 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "compio-log 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cyper-core",
+ "futures-channel",
+ "futures-util",
+ "hyper",
+ "hyper-util",
+ "send_wrapper",
+ "socket2 0.5.10",
+ "tokio",
+ "tower 0.5.2",
+ "tower-service",
 ]
 
 [[package]]
@@ -7652,10 +7686,12 @@ dependencies = [
  "chrono",
  "clap",
  "compio 0.15.0 (git+https://github.com/compio-rs/compio.git?rev=fe4243f0b6811ebc325afd081c9b087b4d9817be)",
+ "compio-net 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "console-subscriber",
  "crossbeam",
  "ctrlc",
  "cyper",
+ "cyper-axum",
  "dashmap",
  "derive_more 2.0.1",
  "dotenvy",

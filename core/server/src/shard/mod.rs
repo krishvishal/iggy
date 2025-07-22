@@ -53,6 +53,7 @@ use transmission::connector::{Receiver, ShardConnector, StopReceiver, StopSender
 use crate::{
     archiver::ArchiverKind,
     configs::server::ServerConfig,
+    http::http_server,
     io::fs_utils,
     shard::{
         system::info::SystemInfo,
@@ -166,9 +167,6 @@ pub struct IggyShard {
     pub(crate) tcp_bound_address: Cell<Option<SocketAddr>>,
 }
 
-// unsafe impl Send for IggyShard {}
-// unsafe impl Sync     for IggyShard {}
-
 impl IggyShard {
     pub fn builder() -> IggyShardBuilder {
         Default::default()
@@ -263,6 +261,14 @@ impl IggyShard {
         tasks.push(Box::pin(spawn_message_maintainance_task(self.clone())));
         if self.config.tcp.enabled {
             tasks.push(Box::pin(spawn_tcp_server(self.clone())));
+        }
+
+        if self.config.http.enabled && self.id == 0 {
+            println!("Starting HTTP server on shard: {}", self.id);
+            tasks.push(Box::pin(http_server::start(
+                self.config.http.clone(),
+                self.clone(),
+            )));
         }
 
         let stop_receiver = self.get_stop_receiver();

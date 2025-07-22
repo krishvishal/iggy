@@ -24,6 +24,7 @@ use crate::http::shared::AppState;
 use crate::state::command::EntryCommand;
 use crate::state::models::CreateConsumerGroupWithId;
 use crate::streaming::session::Session;
+use axum::debug_handler;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
@@ -34,6 +35,7 @@ use iggy_common::Validatable;
 use iggy_common::create_consumer_group::CreateConsumerGroup;
 use iggy_common::delete_consumer_group::DeleteConsumerGroup;
 use iggy_common::{ConsumerGroup, ConsumerGroupDetails};
+use send_wrapper::SendWrapper;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -95,6 +97,7 @@ async fn get_consumer_groups(
     Ok(Json(consumer_groups))
 }
 
+#[debug_handler]
 #[instrument(skip_all, name = "trace_create_consumer_group", fields(iggy_user_id = identity.user_id, iggy_stream_id = stream_id, iggy_topic_id = topic_id))]
 async fn create_consumer_group(
     State(state): State<Arc<AppState>>,
@@ -114,41 +117,48 @@ async fn create_consumer_group(
             command.group_id,
             &command.name,
         )
-        .with_error_context(|error| format!("{COMPONENT} (error: {error}) - failed to create consumer group, stream ID: {}, topic ID: {}, group ID: {:?}", stream_id, topic_id, command.group_id))?;
+        .with_error_context(|error| format!("{COMPONENT} (error: {error}) - failed to create consumer group, stream ID: {}, topic ID: {}, group_id: {:?}", stream_id, topic_id, command.group_id))?;
 
     let group_id = group_id_identifier.get_u32_value().unwrap_or_default();
 
-    let stream = state
-        .shard
-        .get_stream(&command.stream_id)
-        .map_err(|_| CustomError::ResourceNotFound)?;
-    let Ok(consumer_group) = state.shard.get_consumer_group(
-        &Session::stateless(identity.user_id, identity.ip_address),
-        &stream,
-        &command.topic_id,
-        &group_id_identifier,
-    ) else {
-        return Err(CustomError::ResourceNotFound);
-    };
-    let Some(consumer_group) = consumer_group else {
-        return Err(CustomError::ResourceNotFound);
+    let consumer_group_details = {
+        let stream = state
+            .shard
+            .get_stream(&command.stream_id)
+            .map_err(|_| CustomError::ResourceNotFound)?;
+
+        let Ok(consumer_group) = state.shard.get_consumer_group(
+            &Session::stateless(identity.user_id, identity.ip_address),
+            &stream,
+            &command.topic_id,
+            &group_id_identifier,
+        ) else {
+            return Err(CustomError::ResourceNotFound);
+        };
+
+        let Some(consumer_group) = consumer_group else {
+            return Err(CustomError::ResourceNotFound);
+        };
+
+        mapper::map_consumer_group(&consumer_group)
     };
 
-    let consumer_group_details = mapper::map_consumer_group(&consumer_group);
+    let entry_command =
+        EntryCommand::CreateConsumerGroup(CreateConsumerGroupWithId { group_id, command });
+    let state_future = SendWrapper::new(
+        state
+            .shard
+            .shard()
+            .state
+            .apply(identity.user_id, &entry_command),
+    );
 
-    // Use the group_id for state management
-    state
-        .shard
-        .state
-        .apply(
-            identity.user_id,
-            &EntryCommand::CreateConsumerGroup(CreateConsumerGroupWithId { group_id, command }),
-        )
-        .await?;
+    state_future.await?;
 
     Ok((StatusCode::CREATED, Json(consumer_group_details)))
 }
 
+#[debug_handler]
 #[instrument(skip_all, name = "trace_delete_consumer_group", fields(iggy_user_id = identity.user_id, iggy_stream_id = stream_id, iggy_topic_id = topic_id, iggy_group_id = group_id))]
 async fn delete_consumer_group(
     State(state): State<Arc<AppState>>,
@@ -159,28 +169,31 @@ async fn delete_consumer_group(
     let identifier_topic_id = Identifier::from_str_value(&topic_id)?;
     let identifier_group_id = Identifier::from_str_value(&group_id)?;
 
-    state.shard
-        .delete_consumer_group(
-            &Session::stateless(identity.user_id, identity.ip_address),
-            &identifier_stream_id,
-            &identifier_topic_id,
-            &identifier_group_id,
-        )
-        .await
+    let session = Session::stateless(identity.user_id, identity.ip_address);
+    let delete_future = SendWrapper::new(state.shard.delete_consumer_group(
+        &session,
+        &identifier_stream_id,
+        &identifier_topic_id,
+        &identifier_group_id,
+    ));
+
+    delete_future.await
         .with_error_context(|error| format!("{COMPONENT} (error: {error}) - failed to delete consumer group with ID: {group_id} for topic with ID: {topic_id} in stream with ID: {stream_id}"))?;
 
-    state
-        .shard
-        .state
-        .apply(
-            identity.user_id,
-            &EntryCommand::DeleteConsumerGroup(DeleteConsumerGroup {
-                stream_id: identifier_stream_id,
-                topic_id: identifier_topic_id,
-                group_id: identifier_group_id,
-            }),
-        )
-        .await?;
+    let entry_command = EntryCommand::DeleteConsumerGroup(DeleteConsumerGroup {
+        stream_id: identifier_stream_id,
+        topic_id: identifier_topic_id,
+        group_id: identifier_group_id,
+    });
+    let state_future = SendWrapper::new(
+        state
+            .shard
+            .shard()
+            .state
+            .apply(identity.user_id, &entry_command),
+    );
+
+    state_future.await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
