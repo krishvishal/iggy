@@ -28,6 +28,7 @@ use crate::http::*;
 use crate::shard::IggyShard;
 // use crate::streaming::systems::system::SharedSystem;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::connect_info::Connected;
 use axum::http::Method;
 use axum::{Router, middleware};
 use axum_server::tls_rustls::RustlsConfig;
@@ -40,7 +41,27 @@ use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info};
 
-//
+#[derive(Debug, Clone, Copy)]
+pub struct CompioSocketAddr(pub SocketAddr);
+
+impl From<SocketAddr> for CompioSocketAddr {
+    fn from(addr: SocketAddr) -> Self {
+        CompioSocketAddr(addr)
+    }
+}
+
+impl From<CompioSocketAddr> for SocketAddr {
+    fn from(addr: CompioSocketAddr) -> Self {
+        addr.0
+    }
+}
+
+impl<'a> Connected<cyper_axum::IncomingStream<'a, TcpListener>> for CompioSocketAddr {
+    fn connect_info(target: cyper_axum::IncomingStream<'a, TcpListener>) -> Self {
+        let addr = *target.remote_addr();
+        CompioSocketAddr(addr)
+    }
+}
 
 /// Starts the HTTP API server.
 /// Returns the address the server is listening on.
@@ -87,19 +108,20 @@ pub async fn start(config: HttpConfig, shard: Rc<IggyShard>) -> Result<(), IggyE
     app = app.layer(middleware::from_fn(request_diagnostics));
 
     if !config.tls.enabled {
-        println!("NO TLS");
         let listener = TcpListener::bind(config.address.clone())
             .await
             .unwrap_or_else(|_| panic!("Failed to bind to HTTP address {}", config.address));
-        println!("listener created");
         let address = listener
             .local_addr()
             .expect("Failed to get local address for HTTP server");
-        println!("address: {address}");
         info!("Started {api_name} on: {address}");
-        println!("#### we hit here 1#####");
         compio::runtime::spawn(async move {
-            if let Err(error) = cyper_axum::serve(listener, app.into_make_service()).await {
+            if let Err(error) = cyper_axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<CompioSocketAddr>(),
+            )
+            .await
+            {
                 error!("Failed to start {api_name} server, error {}", error);
             }
         })
@@ -107,7 +129,6 @@ pub async fn start(config: HttpConfig, shard: Rc<IggyShard>) -> Result<(), IggyE
         // address
         Ok(())
     } else {
-        println!("#### TLS is enabled #####");
         let tls_config = RustlsConfig::from_pem_file(
             PathBuf::from(config.tls.cert_file),
             PathBuf::from(config.tls.key_file),
