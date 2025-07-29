@@ -19,6 +19,7 @@
 use super::COMPONENT;
 use crate::shard::IggyShard;
 use crate::shard::namespace::IggyNamespace;
+use crate::shard::transmission::event::ShardEvent;
 use crate::streaming::partitions::partition;
 use crate::streaming::session::Session;
 use crate::streaming::streams::stream::Stream;
@@ -223,6 +224,13 @@ impl IggyShard {
         let id = stream.stream_id;
 
         stream.persist().await?;
+
+        let event = ShardEvent::CreatedStream {
+            stream_id: stream_id,
+            name: name.to_string(),
+        };
+        let _responses = self.broadcast_event_to_all_shards(event.into()).await;
+
         self.streams_ids.borrow_mut().insert(name.to_owned(), id);
         self.streams.borrow_mut().insert(id, stream);
         self.metrics.increment_streams(1);

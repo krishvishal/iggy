@@ -18,6 +18,7 @@
 
 use super::COMPONENT;
 use crate::shard::namespace::IggyNamespace;
+use crate::shard::transmission::event::ShardEvent;
 use crate::shard::{IggyShard, ShardInfo};
 use crate::streaming::session::Session;
 use crate::streaming::streams::stream::Stream;
@@ -173,7 +174,7 @@ impl IggyShard {
         let stream = self.get_stream(stream_id).with_error_context(|error| {
             format!("{COMPONENT} (error: {error}) - failed to get stream with ID: {stream_id}")
         })?;
-        let stream_id = stream.stream_id;
+        let numeric_stream_id = stream.stream_id;
         let topic = stream
                 .get_topic(&topic_id)
                 .with_error_context(|error| {
@@ -182,6 +183,53 @@ impl IggyShard {
         topic.persist().await.with_error_context(|error| {
             format!("{COMPONENT} (error: {error}) - failed to persist topic: {topic}")
         })?;
+
+        let event = ShardEvent::CreatedTopic {
+            stream_id: stream_id.clone(),
+            topic_id: topic_id.clone(),
+            name: name.to_string(),
+            partitions_count,
+            message_expiry,
+            compression_algorithm,
+            max_topic_size,
+            replication_factor: Some(replication_factor.unwrap_or(1)),
+        };
+        let _responses = self.broadcast_event_to_all_shards(event.into()).await;
+
+        let numeric_topic_id = topic.topic_id;
+        let records = self
+            .create_shard_table_records(&partition_ids, numeric_stream_id, numeric_topic_id)
+            .collect::<Vec<_>>();
+
+        for (ns, shard_info) in records.iter() {
+            let partition = topic.get_partition(ns.partition_id).with_error_context(|error| {
+                format!("{COMPONENT} (error: {error}) - failed to get partition with ID: {} in topic with ID: {topic_id}", ns.partition_id)
+            })?;
+
+            let mut partition = partition.write().await;
+            partition.persist().await.with_error_context(|error| {
+                format!("{COMPONENT} (error: {error}) - failed to persist partition: {partition}")
+            })?;
+
+            if shard_info.id() == self.id {
+                let partition_id = ns.partition_id;
+                partition.open().await.with_error_context(|error| {
+                    format!(
+                        "{COMPONENT} (error: {error}) - failed to open partition with ID: {partition_id} in topic with ID: {topic_id} for stream with ID: {stream_id}"
+                    )
+                })?;
+            }
+        }
+
+        self.insert_shard_table_records(records);
+
+        let event = ShardEvent::CreatedShardTableRecords {
+            stream_id: numeric_stream_id,
+            topic_id: numeric_topic_id,
+            partition_ids: partition_ids.clone(),
+        };
+
+        let _responses = self.broadcast_event_to_all_shards(event.into()).await;
 
         self.metrics.increment_topics(1);
         self.metrics.increment_partitions(partitions_count);
