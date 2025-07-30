@@ -192,7 +192,7 @@ async fn create_topic(
 
     let session = SendWrapper::new(Session::stateless(identity.user_id, identity.ip_address));
 
-    let (topic_id, _) = {
+    let (topic_id, partition_ids) = {
         let future = SendWrapper::new(state.shard.shard().create_topic(
             &session,
             &command.stream_id,
@@ -209,6 +209,65 @@ async fn create_topic(
     .with_error_context(|error| {
         format!("{COMPONENT} (error: {error}) - failed to create topic, stream ID: {stream_id}")
     })?;
+
+    let broadcast_future = SendWrapper::new(async {
+        use crate::shard::transmission::event::ShardEvent;
+
+        let shard = state.shard.shard();
+
+        let event = ShardEvent::CreatedTopic {
+            stream_id: command.stream_id.clone(),
+            topic_id: topic_id.clone(),
+            name: command.name.clone(),
+            partitions_count: command.partitions_count,
+            message_expiry: command.message_expiry,
+            compression_algorithm: command.compression_algorithm,
+            max_topic_size: command.max_topic_size,
+            replication_factor: command.replication_factor,
+        };
+        let _responses = shard.broadcast_event_to_all_shards(event.into()).await;
+
+        let stream = shard.get_stream(&command.stream_id)?;
+        let topic = stream.get_topic(&topic_id)?;
+        let numeric_stream_id = stream.stream_id;
+        let numeric_topic_id = topic.topic_id;
+
+        let records = shard
+            .create_shard_table_records(&partition_ids, numeric_stream_id, numeric_topic_id)
+            .collect::<Vec<_>>();
+
+        for (ns, shard_info) in records.iter() {
+            let partition = topic.get_partition(ns.partition_id)?;
+            let mut partition = partition.write().await;
+            partition.persist().await?;
+            if shard_info.id() == state.shard.shard().id {
+                let partition_id = ns.partition_id;
+                partition.open().await.with_error_context(|error| {
+                    format!(
+                        "{COMPONENT} (error: {error}) - failed to open partition with ID: {partition_id} in topic with ID: {topic_id} for stream with ID: {stream_id}"
+                    )
+                })?;
+            }
+        }
+
+        shard.insert_shard_table_records(records);
+
+        let event = ShardEvent::CreatedShardTableRecords {
+            stream_id: numeric_stream_id,
+            topic_id: numeric_topic_id,
+            partition_ids: partition_ids.clone(),
+        };
+        let _responses = shard.broadcast_event_to_all_shards(event.into()).await;
+
+        Ok::<(), CustomError>(())
+    });
+
+    broadcast_future.await
+        .with_error_context(|error| {
+            format!(
+                "{COMPONENT} (error: {error}) - failed to broadcast topic events, stream ID: {stream_id}"
+            )
+        })?;
 
     let (topic_data, partition_futures) = {
         let stream = state

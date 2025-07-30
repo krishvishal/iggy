@@ -120,6 +120,27 @@ async fn create_stream(
         )
     })?;
 
+    let broadcast_future = SendWrapper::new(async {
+        use crate::shard::transmission::event::ShardEvent;
+
+        let shard = state.shard.shard();
+
+        let event = ShardEvent::CreatedStream {
+            stream_id: command.stream_id,
+            name: command.name.clone(),
+        };
+        let _responses = shard.broadcast_event_to_all_shards(event.into()).await;
+
+        Ok::<(), CustomError>(())
+    });
+
+    broadcast_future.await
+        .with_error_context(|error| {
+            format!(
+                "{COMPONENT} (error: {error}) - failed to broadcast stream creation event, stream ID: {stream_identifier}"
+            )
+        })?;
+
     let stream = state
         .shard
         .shard()
