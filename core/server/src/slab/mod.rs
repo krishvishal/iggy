@@ -85,6 +85,23 @@ impl<T: Keyed + Debug> IndexedSlab<T> {
         let index = self.index.get(key).unwrap();
         unsafe { self.slab.get_unchecked_mut(*index) }
     }
+
+    pub fn update_key(&mut self, index: usize, new_key: T::Key) -> Result<T::Key, String> {
+        if !self.slab.contains(index) {
+            return Err(format!("Index {} not found in slab", index));
+        }
+
+        if self.index.contains_key(&new_key) {
+            return Err(format!("Key {:?} already exists", new_key));
+        }
+
+        let old_key = self.slab[index].key().clone();
+
+        self.index.remove(&old_key);
+        self.index.insert(new_key, index);
+
+        Ok(old_key)
+    }
 }
 
 impl<T: Keyed> Index<usize> for IndexedSlab<T> {

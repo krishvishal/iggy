@@ -6,8 +6,8 @@ use std::sync::{
 #[derive(Default, Debug)]
 pub struct StreamStats {
     size_bytes: AtomicU64,
-    messages_count: AtomicU64,
-    segments_count: AtomicU32,
+    pub messages_count: AtomicU64,
+    pub segments_count: AtomicU32,
 }
 
 impl StreamStats {
