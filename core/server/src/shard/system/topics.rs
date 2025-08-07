@@ -474,7 +474,7 @@ impl IggyShard {
         if old_name != name {
             self.streams2.with_topics(stream_id, |topics| {
                 topics.with_mut(|container| {
-                    container.rename_unchecked(&old_name, name);
+                    container.update_key_unchecked(&old_name, name);
                 })
             });
         }

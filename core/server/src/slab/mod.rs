@@ -53,7 +53,7 @@ impl<T: Keyed + Debug> IndexedSlab<T> {
             .and_then(|index| Some(self.slab.remove(index)))
     }
 
-    pub fn rename_unchecked(&mut self, old: &T::Key, new_key: T::Key) {
+    pub fn update_key_unchecked(&mut self, old: &T::Key, new_key: T::Key) {
         let idx = self.index.remove(old).expect("Rename key: key not found");
         self.index.insert(new_key, idx);
     }

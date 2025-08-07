@@ -435,7 +435,7 @@ impl IggyShard {
         });
 
         self.streams2
-            .with_mut(|streams| streams.rename_unchecked(&old_name, name));
+            .with_mut(|streams| streams.update_key_unchecked(&old_name, name));
         Ok(old_name)
     }
 
