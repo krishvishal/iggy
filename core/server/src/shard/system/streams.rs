@@ -387,10 +387,7 @@ impl IggyShard {
     }
 
     pub fn update_stream2_bypass_auth(&self, id: &Identifier, name: &str) -> Result<(), IggyError> {
-        let stream_id = self
-            .streams2
-            .with_stream_by_id(id, |stream| stream.id() as u32);
-        self.update_stream2_base(stream_id, id, name)?;
+        self.update_stream2_base(id, name.to_string())?;
         Ok(())
     }
 
@@ -415,16 +412,11 @@ impl IggyShard {
                     stream_id
                 )
             })?;
-        self.update_stream2_base(stream_id, id, name)?;
+        self.update_stream2_base(id, name.to_string())?;
         Ok(())
     }
 
-    fn update_stream2_base(
-        &self,
-        stream_id: u32,
-        id: &Identifier,
-        name: &str,
-    ) -> Result<String, IggyError> {
+    fn update_stream2_base(&self, id: &Identifier, name: String) -> Result<String, IggyError> {
         let old_name = self
             .streams2
             .with_stream_by_id(id, |stream| stream.name().clone());
@@ -433,15 +425,19 @@ impl IggyShard {
             return Ok(old_name);
         }
 
-        self.streams2.with_mut(|streams| {
-            streams
-                .update_key(stream_id as usize, name.to_string())
-                .map_err(|e| IggyError::StreamNameAlreadyExists(e))?;
+        // if stream with name already exists, return error
+        if self.streams2.with(|streams| streams.contains_key(&name)) {
+            return Err(IggyError::StreamNameAlreadyExists(name.to_string()));
+        }
 
-            streams[stream_id as usize].set_name(name.to_owned());
+        let (old_name, new_name) = self.streams2.with_stream_by_id_mut(id, |stream| {
+            let old_name = stream.name().clone();
+            stream.set_name(name.clone());
+            (old_name, name)
+        });
 
-            Ok(())
-        })?;
+        self.streams2
+            .with_mut(|streams| streams.rename_unchecked(&old_name, new_name));
         Ok(old_name)
     }
 
@@ -518,20 +514,6 @@ impl IggyShard {
             .streams2
             .with_stream_by_id(id, |stream| (stream.id() as u32, stream.name().clone()));
 
-        let (topic_count, partition_count, message_count, segment_count) =
-            self.streams2.with_stats(|stats| {
-                if let Some(stream_stats) = stats.get(stream_id as usize) {
-                    (
-                        0u32, // TODO: stats doesn't have topic count
-                        0u32, // TODO: stats doesn't have partition count
-                        stream_stats.messages_count.load(Ordering::SeqCst),
-                        stream_stats.segments_count.load(Ordering::SeqCst),
-                    )
-                } else {
-                    (0u32, 0u32, 0u64, 0u32)
-                }
-            });
-
         let stream = self.streams2.with_mut(|streams| {
             streams
                 .try_remove(stream_id as usize)
@@ -544,21 +526,18 @@ impl IggyShard {
         })?;
 
         self.streams2.with_stats_mut(|stats| {
-            stats
-                .try_remove(stream_id as usize)
-                .expect("Stream delete: stream stats not found");
+            if let Some(stream_stats) = stats.try_remove(stream_id as usize) {
+                self.metrics.decrement_streams(1);
+                self.metrics.decrement_topics(0); // TODO: stats doesn't have topic count
+                self.metrics.decrement_partitions(0); // TODO: stats doesn't have partition count
+                self.metrics
+                    .decrement_messages(stream_stats.messages_count());
+                self.metrics
+                    .decrement_segments(stream_stats.segments_count());
+            } else {
+                self.metrics.decrement_streams(1);
+            }
         });
-
-        self.metrics.decrement_streams(1);
-        self.metrics.decrement_topics(topic_count);
-        self.metrics.decrement_partitions(partition_count);
-        self.metrics.decrement_messages(message_count);
-        self.metrics.decrement_segments(segment_count);
-
-        let current_stream_id = CURRENT_STREAM_ID.load(Ordering::SeqCst);
-        if current_stream_id > stream_id {
-            CURRENT_STREAM_ID.store(stream_id, Ordering::SeqCst);
-        }
 
         self.client_manager
             .borrow_mut()
