@@ -430,14 +430,12 @@ impl IggyShard {
             return Err(IggyError::StreamNameAlreadyExists(name.to_string()));
         }
 
-        let (old_name, new_name) = self.streams2.with_stream_by_id_mut(id, |stream| {
-            let old_name = stream.name().clone();
+        self.streams2.with_stream_by_id_mut(id, |stream| {
             stream.set_name(name.clone());
-            (old_name, name)
         });
 
         self.streams2
-            .with_mut(|streams| streams.rename_unchecked(&old_name, new_name));
+            .with_mut(|streams| streams.rename_unchecked(&old_name, name));
         Ok(old_name)
     }
 
@@ -552,7 +550,7 @@ impl IggyShard {
         id: &Identifier,
     ) -> Result<stream2::Stream, IggyError> {
         self.ensure_authenticated(session)?;
-        self.ensure_stream_exists(id)?;
+        // self.ensure_stream_exists(id)?;
         let stream_id = self
             .streams2
             .with_stream_by_id(id, |stream| stream.id() as u32);
@@ -619,7 +617,7 @@ impl IggyShard {
 
     pub fn purge_stream2(&self, session: &Session, id: &Identifier) -> Result<(), IggyError> {
         self.ensure_authenticated(session)?;
-        self.ensure_stream_exists(id)?;
+        // self.ensure_stream_exists(id)?;
         let stream_id = self
             .streams2
             .with_stream_by_id(id, |stream| stream.id() as u32);
