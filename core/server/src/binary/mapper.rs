@@ -287,6 +287,7 @@ fn extend_client(client: &Client, bytes: &mut BytesMut) {
     let transport: u8 = match client.transport {
         Transport::Tcp => 1,
         Transport::Quic => 2,
+        Transport::WebSocket => 3,
     };
     bytes.put_u8(transport);
     let address = client.session.ip_address.to_string();

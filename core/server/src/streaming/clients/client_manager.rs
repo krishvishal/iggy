@@ -51,6 +51,7 @@ pub struct ConsumerGroup {
 pub enum Transport {
     Tcp,
     Quic,
+    WebSocket,
 }
 
 impl Display for Transport {
@@ -58,6 +59,7 @@ impl Display for Transport {
         match self {
             Transport::Tcp => write!(f, "TCP"),
             Transport::Quic => write!(f, "QUIC"),
+            Transport::WebSocket => write!(f, "WEBSOCKET"),
         }
     }
 }

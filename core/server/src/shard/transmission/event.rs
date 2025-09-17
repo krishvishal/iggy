@@ -136,4 +136,7 @@ pub enum ShardEvent {
     TcpBound {
         address: SocketAddr,
     },
+    WebSocketBound {
+        address: SocketAddr,
+    },
 }

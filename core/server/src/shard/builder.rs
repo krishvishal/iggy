@@ -165,6 +165,7 @@ impl IggyShardBuilder {
             is_shutting_down: AtomicBool::new(false),
             tcp_bound_address: Cell::new(None),
             quic_bound_address: Cell::new(None),
+            websocket_bound_address: Cell::new(None),
 
             permissioner: Default::default(),
             client_manager: Default::default(),

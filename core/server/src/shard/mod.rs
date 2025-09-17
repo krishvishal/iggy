@@ -171,6 +171,7 @@ pub struct IggyShard {
     pub(crate) is_shutting_down: AtomicBool,
     pub(crate) tcp_bound_address: Cell<Option<SocketAddr>>,
     pub(crate) quic_bound_address: Cell<Option<SocketAddr>>,
+    pub websocket_bound_address: Cell<Option<SocketAddr>>,
 }
 
 impl IggyShard {
@@ -221,6 +222,7 @@ impl IggyShard {
             is_shutting_down: AtomicBool::new(false),
             tcp_bound_address: Cell::new(None),
             quic_bound_address: Cell::new(None),
+            websocket_bound_address: Cell::new(None),
         };
         let user = User::root(DEFAULT_ROOT_USERNAME, DEFAULT_ROOT_PASSWORD);
         shard
@@ -268,6 +270,15 @@ impl IggyShard {
             tasks.push(Box::pin(crate::quic::quic_server::span_quic_server(
                 self.clone(),
             )));
+        }
+
+        if self.config.websocket.enabled && self.id == 0 {
+            tasks.push(Box::pin(
+                crate::websocket::websocket_server::spawn_websocket_server(
+                    self.clone(),
+                    self.config.websocket.clone(),
+                ),
+            ));
         }
 
         let stop_receiver = self.get_stop_receiver();
@@ -792,6 +803,10 @@ impl IggyShard {
                     &polling_consumer,
                     partition_id,
                 )?;
+                Ok(())
+            }
+            ShardEvent::WebSocketBound { address } => {
+                self.websocket_bound_address.set(Some(address));
                 Ok(())
             }
         }
