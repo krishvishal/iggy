@@ -220,35 +220,17 @@ where
     /// - Primary sends to first backup
     /// - Each backup forwards to the next
     /// - Stops when we would forward back to primary
-    ///
-    /// Direction alternates based on op number:
-    /// - Even ops: clockwise (+1)
-    /// - Odd ops: counter-clockwise (-1)
     async fn replicate(&self, message: Message<PrepareHeader>) {
         let header = message.header();
 
         assert_eq!(header.command, Command2::Prepare);
-
-        // Preconditions - caller must ensure these
         assert!(
             !self.journal.has_prepare(header),
             "replicate: must not already have prepare"
         );
+        assert!(header.op > self.consensus.commit());
 
-        let direction = self.consensus.replicate_direction(header.op);
-
-        // Calculate next replica in the ring
-        let next: u8 = if direction > 0 {
-            // Clockwise
-            (self.consensus.replica() + 1) % self.consensus.replica_count()
-        } else {
-            // Counter-clockwise
-            if self.consensus.replica() == 0 {
-                self.consensus.replica_count() - 1
-            } else {
-                self.consensus.replica() - 1
-            }
-        };
+        let next = (self.consensus.replica() + 1) % self.consensus.replica_count();
 
         let primary = self.consensus.primary_index(header.view);
         if next == primary {
@@ -260,14 +242,19 @@ where
             return;
         }
 
-        // TODO: are we doing standbys?
-
         assert_ne!(next, self.consensus.replica());
-        assert!(next < self.consensus.replica_count());
 
+        debug!(
+            replica = self.consensus.replica(),
+            to = next,
+            op = header.op,
+            "replicate: forwarding"
+        );
+
+        let message = message.into_generic();
         self.consensus
             .message_bus()
-            .send_to_replica(next, message.clone().into_generic())
+            .send_to_replica(next, message)
             .await
             .unwrap();
     }

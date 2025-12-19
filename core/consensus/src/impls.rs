@@ -420,12 +420,6 @@ impl VsrConsensus {
         &mut self.pipeline
     }
 
-    /// Even ops replicate clockwise.
-    /// Odd ops replicate counter-clockwise.
-    pub fn replicate_direction(&self, op: u64) -> i16 {
-        if op.is_multiple_of(2) { 1 } else { -1 }
-    }
-
     pub fn cluster(&self) -> u128 {
         self.cluster
     }
