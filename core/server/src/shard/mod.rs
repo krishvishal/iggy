@@ -36,8 +36,8 @@ use ahash::AHashSet;
 use builder::IggyShardBuilder;
 use iggy_common::SemanticVersion;
 use iggy_common::sharding::{IggyNamespace, PartitionLocation};
-use papaya::HashMap as PapayaMap;
 use iggy_common::{EncryptorKind, IggyError};
+use papaya::HashMap as PapayaMap;
 use std::{
     cell::{Cell, RefCell},
     net::SocketAddr,
