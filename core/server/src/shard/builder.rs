@@ -32,10 +32,10 @@ use crate::{
     },
 };
 use ahash::AHashSet;
-use dashmap::DashMap;
 use iggy_common::EncryptorKind;
 use iggy_common::SemanticVersion;
 use iggy_common::sharding::{IggyNamespace, PartitionLocation};
+use papaya::HashMap as PapayaMap;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -45,7 +45,7 @@ use std::{
 #[derive(Default)]
 pub struct IggyShardBuilder {
     id: Option<u16>,
-    shards_table: Option<EternalPtr<DashMap<IggyNamespace, PartitionLocation>>>,
+    shards_table: Option<EternalPtr<PapayaMap<IggyNamespace, PartitionLocation>>>,
     state: Option<FileState>,
     client_manager: Option<ClientManager>,
     connections: Option<Vec<ShardConnector<ShardFrame>>>,
@@ -76,7 +76,7 @@ impl IggyShardBuilder {
 
     pub fn shards_table(
         mut self,
-        shards_table: EternalPtr<DashMap<IggyNamespace, PartitionLocation>>,
+        shards_table: EternalPtr<PapayaMap<IggyNamespace, PartitionLocation>>,
     ) -> Self {
         self.shards_table = Some(shards_table);
         self

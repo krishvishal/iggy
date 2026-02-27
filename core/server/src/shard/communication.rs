@@ -154,7 +154,8 @@ impl IggyShard {
     }
 
     pub fn find_shard(&self, namespace: &IggyNamespace) -> Option<&ShardConnector<ShardFrame>> {
-        self.shards_table.get(namespace).map(|location| {
+        let guard = self.shards_table.pin();
+        guard.get(namespace).map(|location| {
             self.shards
                 .iter()
                 .find(|shard| shard.id == *location.shard_id)
@@ -163,21 +164,21 @@ impl IggyShard {
     }
 
     pub fn remove_shard_table_record(&self, namespace: &IggyNamespace) -> PartitionLocation {
-        self.shards_table
+        let guard = self.shards_table.pin();
+        *guard
             .remove(namespace)
-            .map(|(_, location)| location)
             .expect("remove_shard_table_record: namespace not found")
     }
 
     pub fn insert_shard_table_record(&self, ns: IggyNamespace, location: PartitionLocation) {
-        self.shards_table.insert(ns, location);
+        self.shards_table.pin().insert(ns, location);
     }
 
     pub fn get_current_shard_namespaces(&self) -> Vec<IggyNamespace> {
-        self.shards_table
+        let guard = self.shards_table.pin();
+        guard
             .iter()
-            .filter_map(|entry| {
-                let (ns, location) = entry.pair();
+            .filter_map(|(ns, location)| {
                 if *location.shard_id == self.id {
                     Some(*ns)
                 } else {

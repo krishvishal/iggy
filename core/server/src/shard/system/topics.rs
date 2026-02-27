@@ -169,9 +169,9 @@ impl IggyShard {
 
         let namespaces_to_remove: Vec<_> = self
             .shards_table
+            .pin()
             .iter()
-            .filter_map(|entry| {
-                let (ns, _) = entry.pair();
+            .filter_map(|(ns, _)| {
                 if ns.stream_id() == stream && ns.topic_id() == topic_id {
                     Some(*ns)
                 } else {

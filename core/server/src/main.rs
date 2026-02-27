@@ -320,9 +320,10 @@ fn main() -> Result<(), ServerError> {
         // TODO: Persist the shards table and load it from the disk, so it does not have to be
         // THIRTEENTH DISCRETE LOADING STEP.
         // Shared resources bootstrap.
-        let shards_table = Box::new(DashMap::with_capacity(SHARDS_TABLE_CAPACITY));
+        let shards_table = Box::new(papaya::HashMap::with_capacity(SHARDS_TABLE_CAPACITY));
         let shards_table = Box::leak(shards_table);
-        let shards_table: EternalPtr<DashMap<IggyNamespace, PartitionLocation>> = shards_table.into();
+        let shards_table: EternalPtr<papaya::HashMap<IggyNamespace, PartitionLocation>> =
+            shards_table.into();
 
         let client_manager = Box::new(DashMap::new());
         let client_manager = Box::leak(client_manager);
@@ -331,6 +332,7 @@ fn main() -> Result<(), ServerError> {
 
         // Populate shards_table from SharedMetadata partitions (hierarchical traversal)
         metadata.with_metadata(|metadata| {
+            let guard = shards_table.pin();
             for (stream_id, stream_meta) in metadata.streams.iter() {
                 for (topic_id, topic_meta) in stream_meta.topics.iter() {
                     for (partition_id, _partition_meta) in topic_meta.partitions.iter().enumerate() {
@@ -341,7 +343,7 @@ fn main() -> Result<(), ServerError> {
                         ));
                         // TODO(hubcio): LocalIdx is 0 until IggyPartitions is integrated
                         let location = PartitionLocation::new(shard_id, LocalIdx::new(0));
-                        shards_table.insert(ns, location);
+                        guard.insert(ns, location);
                     }
                 }
             }

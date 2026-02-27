@@ -34,9 +34,9 @@ use crate::{
 };
 use ahash::AHashSet;
 use builder::IggyShardBuilder;
-use dashmap::DashMap;
 use iggy_common::SemanticVersion;
 use iggy_common::sharding::{IggyNamespace, PartitionLocation};
+use papaya::HashMap as PapayaMap;
 use iggy_common::{EncryptorKind, IggyError};
 use std::{
     cell::{Cell, RefCell},
@@ -77,7 +77,7 @@ pub struct IggyShard {
     pub(crate) local_partitions: RefCell<LocalPartitions>,
     pub(crate) pending_partition_inits: RefCell<AHashSet<IggyNamespace>>,
 
-    pub(crate) shards_table: EternalPtr<DashMap<IggyNamespace, PartitionLocation>>,
+    pub(crate) shards_table: EternalPtr<PapayaMap<IggyNamespace, PartitionLocation>>,
     pub(crate) state: FileState,
 
     pub(crate) encryptor: Option<EncryptorKind>,
@@ -203,9 +203,8 @@ impl IggyShard {
     }
 
     async fn load_segments(&self) -> Result<(), IggyError> {
-        for shard_entry in self.shards_table.iter() {
-            let (namespace, location) = shard_entry.pair();
-
+        let guard = self.shards_table.pin();
+        for (namespace, location) in guard.iter() {
             if *location.shard_id == self.id {
                 let stream_id = namespace.stream_id();
                 let topic_id: usize = namespace.topic_id();
