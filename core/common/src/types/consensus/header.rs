@@ -967,3 +967,97 @@ impl ConsensusHeader for StartViewHeader {
         self.size
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command2_try_from_valid() {
+        let cases = [
+            (0, Command2::Reserved),
+            (1, Command2::Ping),
+            (2, Command2::Pong),
+            (3, Command2::PingClient),
+            (4, Command2::PongClient),
+            (5, Command2::Request),
+            (6, Command2::Prepare),
+            (7, Command2::PrepareOk),
+            (8, Command2::Reply),
+            (9, Command2::Commit),
+            (10, Command2::StartViewChange),
+            (11, Command2::DoViewChange),
+            (12, Command2::StartView),
+        ];
+        for (byte, expected) in cases {
+            assert_eq!(Command2::try_from(byte), Ok(expected), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn command2_try_from_invalid() {
+        for byte in [13, 14, 100, 255] {
+            assert_eq!(Command2::try_from(byte), Err(byte), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn command2_roundtrip() {
+        for byte in 0u8..=12 {
+            let cmd = Command2::try_from(byte).unwrap();
+            assert_eq!(cmd as u8, byte);
+        }
+    }
+
+    #[test]
+    fn operation_try_from_valid() {
+        let cases = [
+            (0, Operation::Default),
+            (128, Operation::CreateStream),
+            (129, Operation::UpdateStream),
+            (130, Operation::DeleteStream),
+            (131, Operation::PurgeStream),
+            (132, Operation::CreateTopic),
+            (133, Operation::UpdateTopic),
+            (134, Operation::DeleteTopic),
+            (135, Operation::PurgeTopic),
+            (136, Operation::CreatePartitions),
+            (137, Operation::DeletePartitions),
+            (138, Operation::DeleteSegments),
+            (139, Operation::CreateConsumerGroup),
+            (140, Operation::DeleteConsumerGroup),
+            (141, Operation::CreateUser),
+            (142, Operation::UpdateUser),
+            (143, Operation::DeleteUser),
+            (144, Operation::ChangePassword),
+            (145, Operation::UpdatePermissions),
+            (146, Operation::CreatePersonalAccessToken),
+            (147, Operation::DeletePersonalAccessToken),
+            (160, Operation::SendMessages),
+            (161, Operation::StoreConsumerOffset),
+            (200, Operation::Reserved),
+        ];
+        for (byte, expected) in cases {
+            assert_eq!(Operation::try_from(byte), Ok(expected), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn operation_try_from_invalid() {
+        for byte in [1, 127, 148, 159, 162, 199, 201, 255] {
+            assert_eq!(Operation::try_from(byte), Err(byte), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn operation_roundtrip() {
+        let valid_bytes: &[u8] = &[
+            0, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144,
+            145, 146, 147, 160, 161, 200,
+        ];
+        for &byte in valid_bytes {
+            let op = Operation::try_from(byte).unwrap();
+            assert_eq!(op as u8, byte);
+        }
+    }
+}
