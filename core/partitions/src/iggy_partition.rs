@@ -15,9 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::journal::{MessageLookup, PartitionJournal, PartitionJournalMemStorage};
+use crate::journal::{
+    MessageLookup, PartitionJournal, PartitionJournalMemStorage, QueryableJournal,
+};
 use crate::log::SegmentedLog;
-use crate::{AppendResult, Partition, PartitionOffsets, PollingArgs, PollingConsumer, decode_send_messages_batch};
+use crate::{
+    AppendResult, Partition, PartitionOffsets, PollingArgs, PollingConsumer,
+    decode_send_messages_batch,
+};
 use iggy_common::{
     ConsumerGroupId, ConsumerGroupOffsets, ConsumerKind, ConsumerOffset, ConsumerOffsets,
     IggyByteSize, IggyError, IggyMessagesBatchMut, IggyMessagesBatchSet, IggyTimestamp,
@@ -184,10 +189,15 @@ impl Partition for IggyPartition {
             PollingKind::First => 0,
             PollingKind::Last => committed_offset.saturating_sub(u64::from(args.count) - 1),
             PollingKind::Timestamp => {
-                let result = self.log.journal().inner.get(&MessageLookup::Timestamp {
-                    timestamp: args.strategy.value,
-                    count: args.count,
-                });
+                let result = self
+                    .log
+                    .journal()
+                    .inner
+                    .get(&MessageLookup::Timestamp {
+                        timestamp: args.strategy.value,
+                        count: args.count,
+                    })
+                    .await;
                 let batch_set = result.unwrap_or_else(IggyMessagesBatchSet::empty);
                 if let Some(first) = batch_set.first_offset() {
                     if first > committed_offset {
@@ -210,10 +220,15 @@ impl Partition for IggyPartition {
         let max_count = u32::try_from(committed_offset - start_offset + 1).unwrap_or(u32::MAX);
         let count = args.count.min(max_count);
 
-        let result = self.log.journal().inner.get(&MessageLookup::Offset {
-            offset: start_offset,
-            count,
-        });
+        let result = self
+            .log
+            .journal()
+            .inner
+            .get(&MessageLookup::Offset {
+                offset: start_offset,
+                count,
+            })
+            .await;
 
         let batch_set = result.unwrap_or_else(IggyMessagesBatchSet::empty);
 
