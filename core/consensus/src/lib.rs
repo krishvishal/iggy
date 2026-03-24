@@ -102,6 +102,9 @@ where
         H: ConsensusHeader;
 }
 
+pub mod clients_table;
+pub use clients_table::ClientsTable;
+
 mod impls;
 pub use impls::*;
 mod plane_mux;

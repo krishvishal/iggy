@@ -25,9 +25,9 @@ use crate::types::PartitionsConfig;
 use consensus::PlaneIdentity;
 use consensus::{
     Consensus, NamespacedPipeline, Pipeline, PipelineEntry, Plane, Project, Sequencer,
-    VsrConsensus, ack_preflight, build_reply_message, fence_old_prepare_by_commit,
-    pipeline_prepare_common, replicate_preflight, replicate_to_next_in_chain,
-    send_prepare_ok as send_prepare_ok_common,
+    VsrConsensus, ack_preflight, build_reply_message, clients_table::RequestStatus,
+    fence_old_prepare_by_commit, pipeline_prepare_common, replicate_preflight,
+    replicate_to_next_in_chain, send_prepare_ok as send_prepare_ok_common,
 };
 use iggy_binary_protocol::{
     Command2, ConsensusHeader, GenericHeader, Message, Operation, PrepareHeader, PrepareOkHeader,
@@ -347,6 +347,34 @@ where
         let consensus = self
             .consensus()
             .expect("on_request: consensus not initialized");
+        let client_id = message.header().client;
+        let request = message.header().request;
+
+        // Duplicate detection via client-table
+        let status = consensus
+            .clients_table()
+            .borrow()
+            .check_request(client_id, request);
+        match status {
+            RequestStatus::Duplicate(cached_reply) => {
+                debug!(
+                    "on_request: duplicate request={request} for client={client_id}, re-sending cached reply"
+                );
+                consensus
+                    .message_bus()
+                    .send_to_client(client_id, cached_reply.into_generic())
+                    .await
+                    .unwrap();
+                return;
+            }
+            RequestStatus::InProgress => {
+                debug!(
+                    "on_request: request={request} for client={client_id} already in progress, dropping"
+                );
+                return;
+            }
+            RequestStatus::New => {}
+        }
 
         debug!(?namespace, "handling partition request");
         let prepare = message.project(consensus);
@@ -491,17 +519,22 @@ where
                 }
             }
 
-            let generic_reply =
-                build_reply_message(consensus, &prepare_header, bytes::Bytes::new()).into_generic();
+            let reply = build_reply_message(consensus, &prepare_header, bytes::Bytes::new());
+            // Cache reply for duplicate detection:
+            consensus
+                .clients_table()
+                .borrow_mut()
+                .commit_reply(prepare_header.client, reply.clone());
             debug!(
                 "on_ack: sending reply to client={} for op={}",
                 prepare_header.client, prepare_header.op
             );
 
+            // Wire delivery to the client socket:
             // TODO: Propagate send error instead of panicking; requires bus error design.
             consensus
                 .message_bus()
-                .send_to_client(prepare_header.client, generic_reply)
+                .send_to_client(prepare_header.client, reply.into_generic())
                 .await
                 .unwrap();
         }

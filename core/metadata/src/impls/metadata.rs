@@ -18,10 +18,10 @@ use crate::stm::StateMachine;
 use crate::stm::snapshot::{FillSnapshot, MetadataSnapshot, Snapshot, SnapshotError};
 use consensus::{
     Consensus, Pipeline, PipelineEntry, Plane, PlaneIdentity, Project, Sequencer, VsrConsensus,
-    ack_preflight, ack_quorum_reached, build_reply_message, drain_committable_prefix,
-    fence_old_prepare_by_commit, panic_if_hash_chain_would_break_in_same_view,
-    pipeline_prepare_common, replicate_preflight, replicate_to_next_in_chain,
-    send_prepare_ok as send_prepare_ok_common,
+    ack_preflight, ack_quorum_reached, build_reply_message, clients_table::RequestStatus,
+    drain_committable_prefix, fence_old_prepare_by_commit,
+    panic_if_hash_chain_would_break_in_same_view, pipeline_prepare_common, replicate_preflight,
+    replicate_to_next_in_chain, send_prepare_ok as send_prepare_ok_common,
 };
 use iggy_binary_protocol::{
     Command2, ConsensusHeader, GenericHeader, Message, PrepareHeader, PrepareOkHeader,
@@ -286,8 +286,35 @@ where
 {
     async fn on_request(&self, message: <VsrConsensus<B> as Consensus>::Message<RequestHeader>) {
         let consensus = self.consensus.as_ref().unwrap();
+        let client_id = message.header().client;
+        let request = message.header().request;
 
-        // TODO: Bunch of asserts.
+        // Duplicate detection via client-table
+        let status = consensus
+            .clients_table()
+            .borrow()
+            .check_request(client_id, request);
+        match status {
+            RequestStatus::Duplicate(cached_reply) => {
+                debug!(
+                    "on_request: duplicate request={request} for client={client_id}, re-sending cached reply"
+                );
+                consensus
+                    .message_bus()
+                    .send_to_client(client_id, cached_reply.into_generic())
+                    .await
+                    .unwrap();
+                return;
+            }
+            RequestStatus::InProgress => {
+                debug!(
+                    "on_request: request={request} for client={client_id} already in progress, dropping"
+                );
+                return;
+            }
+            RequestStatus::New => {}
+        }
+
         debug!("handling metadata request");
         let prepare = message.project(consensus);
         pipeline_prepare_common(consensus, prepare, |prepare| self.on_replicate(prepare)).await;
@@ -436,17 +463,22 @@ where
                 });
                 debug!("on_ack: state applied for op={}", prepare_header.op);
 
-                let generic_reply =
-                    build_reply_message(consensus, &prepare_header, response).into_generic();
+                let reply = build_reply_message(consensus, &prepare_header, response);
+                // Cache reply for duplicate detection:
+                consensus
+                    .clients_table()
+                    .borrow_mut()
+                    .commit_reply(prepare_header.client, reply.clone());
                 debug!(
                     "on_ack: sending reply to client={} for op={}",
                     prepare_header.client, prepare_header.op
                 );
 
+                // Wire delivery to the client socket:
                 // TODO: Propagate send error instead of panicking; requires bus error design.
                 consensus
                     .message_bus()
-                    .send_to_client(prepare_header.client, generic_reply)
+                    .send_to_client(prepare_header.client, reply.into_generic())
                     .await
                     .unwrap();
             }
