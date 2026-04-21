@@ -31,6 +31,7 @@ use crate::{
     },
 };
 use compio::net::TcpStream;
+use iggy_binary_protocol::AckLevel;
 use iggy_common::{IggyError, SenderKind, TransportProtocol, sharding::IggyNamespace};
 use nix::sys::stat::SFlag;
 use std::os::fd::{FromRawFd, IntoRawFd};
@@ -106,7 +107,14 @@ async fn handle_request(
                     .last_offset()
                     .expect("Batch set should have at least one batch");
                 shard
-                    .auto_commit_consumer_offset_from_local_partition(&namespace, consumer, offset)
+                    .store_consumer_offset_internal(
+                        namespace.stream_id(),
+                        namespace.topic_id(),
+                        namespace.partition_id(),
+                        &consumer,
+                        offset,
+                        AckLevel::NoAck,
+                    )
                     .await?;
             }
             Ok(ShardResponse::PollMessages((poll_metadata, batches)))

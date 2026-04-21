@@ -26,6 +26,7 @@ use crate::{
     },
 };
 use err_trail::ErrContext;
+use iggy_binary_protocol::AckLevel;
 use iggy_common::{
     Consumer, ConsumerKind, ConsumerOffsetInfo, Identifier, IggyError, sharding::IggyNamespace,
 };
@@ -39,6 +40,7 @@ impl IggyShard {
         topic: ResolvedTopic,
         partition_id: Option<u32>,
         offset: u64,
+        ack: AckLevel,
     ) -> Result<(PollingConsumer, usize), IggyError> {
         let Some((polling_consumer, partition_id)) = self.resolve_consumer_with_partition_id(
             topic,
@@ -51,32 +53,53 @@ impl IggyShard {
             return Err(IggyError::NotResolvedConsumer(consumer.id));
         };
 
-        self.validate_partition_offset(topic.stream_id, topic.topic_id, partition_id, offset)?;
-
-        self.store_consumer_offset_base(
+        self.store_consumer_offset_internal(
             topic.stream_id,
             topic.topic_id,
-            &polling_consumer,
             partition_id,
+            &polling_consumer,
             offset,
-        );
-        self.persist_consumer_offset_to_disk(
-            topic.stream_id,
-            topic.topic_id,
-            &polling_consumer,
-            partition_id,
+            ack,
         )
         .await?;
 
-        self.maybe_complete_pending_revocation(
-            &polling_consumer,
-            topic.stream_id,
-            topic.topic_id,
-            partition_id,
-        )
-        .await;
-
         Ok((polling_consumer, partition_id))
+    }
+
+    /// Shared offset-write path used by `store_consumer_offset` (explicit
+    /// client writes) and `PollMessages` auto-commit. Resolution and
+    /// permission checks are the caller's responsibility.
+    ///
+    /// `Quorum` performs offset validation; `NoAck` skips it to match the
+    /// trust model of auto-commit (the offset was just polled from the
+    /// partition, so it is known-good by construction).
+    pub(crate) async fn store_consumer_offset_internal(
+        &self,
+        stream_id: usize,
+        topic_id: usize,
+        partition_id: usize,
+        polling_consumer: &PollingConsumer,
+        offset: u64,
+        ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        if matches!(ack, AckLevel::Quorum) {
+            self.validate_partition_offset(stream_id, topic_id, partition_id, offset)?;
+        }
+
+        self.store_consumer_offset_base(
+            stream_id,
+            topic_id,
+            polling_consumer,
+            partition_id,
+            offset,
+        );
+        self.persist_consumer_offset_to_disk(stream_id, topic_id, polling_consumer, partition_id)
+            .await?;
+
+        self.maybe_complete_pending_revocation(polling_consumer, stream_id, topic_id, partition_id)
+            .await;
+
+        Ok(())
     }
 
     pub async fn get_consumer_offset(
@@ -180,6 +203,7 @@ impl IggyShard {
         consumer: Consumer,
         topic: ResolvedTopic,
         partition_id: Option<u32>,
+        _ack: AckLevel,
     ) -> Result<(PollingConsumer, usize), IggyError> {
         let Some((polling_consumer, partition_id)) = self.resolve_consumer_with_partition_id(
             topic,

@@ -16,8 +16,10 @@
  * under the License.
  */
 
+pub mod delete_consumer_offset_2_handler;
 pub mod delete_consumer_offset_handler;
 pub mod get_consumer_offset_handler;
+pub mod store_consumer_offset_2_handler;
 pub mod store_consumer_offset_handler;
 
 pub const COMPONENT: &str = "CONSUMER_OFFSET_HANDLER";

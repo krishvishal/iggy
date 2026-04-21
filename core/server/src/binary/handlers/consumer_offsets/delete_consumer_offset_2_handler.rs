@@ -16,21 +16,18 @@
  * under the License.
  */
 
-use std::rc::Rc;
-
 use crate::binary::dispatch::{HandlerResult, wire_consumer_to_consumer, wire_id_to_identifier};
 use crate::binary::handlers::consumer_offsets::COMPONENT;
 use crate::shard::IggyShard;
 use crate::streaming::session::Session;
 use err_trail::ErrContext;
-use iggy_binary_protocol::AckLevel;
-use iggy_binary_protocol::requests::consumer_offsets::StoreConsumerOffsetRequest;
-use iggy_common::IggyError;
-use iggy_common::SenderKind;
+use iggy_binary_protocol::requests::consumer_offsets::DeleteConsumerOffset2Request;
+use iggy_common::{IggyError, SenderKind};
+use std::rc::Rc;
 use tracing::debug;
 
-pub async fn handle_store_consumer_offset(
-    req: StoreConsumerOffsetRequest,
+pub async fn handle_delete_consumer_offset_2(
+    req: DeleteConsumerOffset2Request,
     sender: &mut SenderKind,
     session: &Session,
     shard: &Rc<IggyShard>,
@@ -39,27 +36,26 @@ pub async fn handle_store_consumer_offset(
     let stream_id = wire_id_to_identifier(&req.stream_id)?;
     let topic_id = wire_id_to_identifier(&req.topic_id)?;
     debug!(
-        "session: {session}, command: store_consumer_offset, stream_id: {stream_id}, topic_id: {topic_id}, partition_id: {:?}, offset: {}",
-        req.partition_id, req.offset
+        "session: {session}, command: delete_consumer_offset_2, stream_id: {stream_id}, topic_id: {topic_id}, partition_id: {:?}, ack: {:?}",
+        req.partition_id, req.ack
     );
     shard.ensure_authenticated(session)?;
-    let topic = shard.resolve_topic_for_store_consumer_offset(
+    let topic = shard.resolve_topic_for_delete_consumer_offset(
         session.get_user_id(),
         &stream_id,
         &topic_id,
     )?;
     shard
-        .store_consumer_offset(
+        .delete_consumer_offset(
             session.client_id,
             consumer,
             topic,
             req.partition_id,
-            req.offset,
-            AckLevel::Quorum,
+            req.ack,
         )
         .await
-        .error(|e: &IggyError| format!("{COMPONENT} (error: {e}) - failed to store consumer offset for stream_id: {}, topic_id: {}, partition_id: {:?}, offset: {}, session: {}",
-            stream_id, topic_id, req.partition_id, req.offset, session
+        .error(|e: &IggyError| format!("{COMPONENT} (error: {e}) - failed to delete consumer offset (v2) for topic with ID: {} in stream with ID: {} partition ID: {:#?}, ack: {:?}, session: {}",
+            topic_id, stream_id, req.partition_id, req.ack, session
         ))?;
     sender.send_empty_ok_response().await?;
     Ok(HandlerResult::Finished)
