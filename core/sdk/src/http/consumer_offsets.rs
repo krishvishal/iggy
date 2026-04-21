@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use iggy_common::ConsumerOffsetClient;
 use iggy_common::get_consumer_offset::GetConsumerOffset;
 use iggy_common::store_consumer_offset::StoreConsumerOffset;
-use iggy_common::{Consumer, ConsumerOffsetInfo};
+use iggy_common::{AckLevel, Consumer, ConsumerOffsetInfo};
 
 #[async_trait]
 impl ConsumerOffsetClient for HttpClient {
@@ -96,6 +96,34 @@ impl ConsumerOffsetClient for HttpClient {
         );
         self.delete(&path).await?;
         Ok(())
+    }
+
+    // HTTP has no wire-level ack parameter; v2 methods delegate to v1 regardless
+    // of the requested `ack`. The binary transport is the path that actually
+    // honours `AckLevel::NoAck`.
+    async fn store_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        offset: u64,
+        _ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        self.store_consumer_offset(consumer, stream_id, topic_id, partition_id, offset)
+            .await
+    }
+
+    async fn delete_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        _ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        self.delete_consumer_offset(consumer, stream_id, topic_id, partition_id)
+            .await
     }
 }
 

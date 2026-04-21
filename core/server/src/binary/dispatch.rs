@@ -330,6 +330,20 @@ pub async fn dispatch(
             )
             .await
         }
+        STORE_CONSUMER_OFFSET_2_CODE => {
+            let req: StoreConsumerOffset2Request = decode(frame.payload)?;
+            handlers::consumer_offsets::store_consumer_offset_2_handler::handle_store_consumer_offset_2(
+                req, sender, session, shard,
+            )
+            .await
+        }
+        DELETE_CONSUMER_OFFSET_2_CODE => {
+            let req: DeleteConsumerOffset2Request = decode(frame.payload)?;
+            handlers::consumer_offsets::delete_consumer_offset_2_handler::handle_delete_consumer_offset_2(
+                req, sender, session, shard,
+            )
+            .await
+        }
 
         // Consumer Groups
         GET_CONSUMER_GROUP_CODE => {

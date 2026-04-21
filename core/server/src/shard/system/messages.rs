@@ -29,9 +29,7 @@ use err_trail::ErrContext;
 use iggy_common::IggyPollMetadata;
 use iggy_common::PooledBuffer;
 use iggy_common::sharding::IggyNamespace;
-use iggy_common::{
-    Consumer, EncryptorKind, IGGY_MESSAGE_HEADER_SIZE, Identifier, IggyError, PollingStrategy,
-};
+use iggy_common::{Consumer, EncryptorKind, IGGY_MESSAGE_HEADER_SIZE, IggyError, PollingStrategy};
 use std::sync::atomic::Ordering;
 use tracing::error;
 
@@ -224,83 +222,6 @@ impl IggyShard {
             );
             return Err(e);
         }
-
-        Ok(())
-    }
-
-    pub(crate) async fn auto_commit_consumer_offset_from_local_partition(
-        &self,
-        namespace: &IggyNamespace,
-        consumer: PollingConsumer,
-        offset: u64,
-    ) -> Result<(), IggyError> {
-        let (offset_value, path) = {
-            let partitions = self.local_partitions.borrow();
-            let partition = partitions.get(namespace).ok_or_else(|| {
-                IggyError::PartitionNotFound(
-                    namespace.partition_id(),
-                    Identifier::numeric(namespace.topic_id() as u32).unwrap(),
-                    Identifier::numeric(namespace.stream_id() as u32).unwrap(),
-                )
-            })?;
-
-            match consumer {
-                PollingConsumer::Consumer(consumer_id, _) => {
-                    tracing::trace!(
-                        "Auto-committing offset {} for consumer {} on partition {:?}",
-                        offset,
-                        consumer_id,
-                        namespace
-                    );
-                    let hdl = partition.consumer_offsets.pin();
-                    let item = hdl.get_or_insert(
-                        consumer_id,
-                        crate::streaming::partitions::consumer_offset::ConsumerOffset::default_for_consumer(
-                            consumer_id as u32,
-                            &self.config.system.get_consumer_offsets_path(
-                                namespace.stream_id(),
-                                namespace.topic_id(),
-                                namespace.partition_id(),
-                            ),
-                        ),
-                    );
-                    item.offset.store(offset, Ordering::Release);
-                    (item.offset.load(Ordering::Relaxed), item.path.clone())
-                }
-                PollingConsumer::ConsumerGroup(consumer_group_id, _) => {
-                    tracing::trace!(
-                        "Auto-committing offset {} for consumer group {} on partition {:?}",
-                        offset,
-                        consumer_group_id.0,
-                        namespace
-                    );
-                    let hdl = partition.consumer_group_offsets.pin();
-                    let item = hdl.get_or_insert(
-                        consumer_group_id,
-                        crate::streaming::partitions::consumer_offset::ConsumerOffset::default_for_consumer_group(
-                            consumer_group_id,
-                            &self.config.system.get_consumer_group_offsets_path(
-                                namespace.stream_id(),
-                                namespace.topic_id(),
-                                namespace.partition_id(),
-                            ),
-                        ),
-                    );
-                    item.offset.store(offset, Ordering::Release);
-                    (item.offset.load(Ordering::Relaxed), item.path.clone())
-                }
-            }
-        };
-
-        crate::streaming::partitions::storage::persist_offset(&path, offset_value).await?;
-
-        self.maybe_complete_pending_revocation(
-            &consumer,
-            namespace.stream_id(),
-            namespace.topic_id(),
-            namespace.partition_id(),
-        )
-        .await;
 
         Ok(())
     }

@@ -20,7 +20,7 @@ use crate::prelude::IggyClient;
 use async_trait::async_trait;
 use iggy_common::ConsumerOffsetClient;
 use iggy_common::locking::IggyRwLockFn;
-use iggy_common::{Consumer, ConsumerOffsetInfo, Identifier, IggyError};
+use iggy_common::{AckLevel, Consumer, ConsumerOffsetInfo, Identifier, IggyError};
 
 #[async_trait]
 impl ConsumerOffsetClient for IggyClient {
@@ -64,6 +64,37 @@ impl ConsumerOffsetClient for IggyClient {
             .read()
             .await
             .delete_consumer_offset(consumer, stream_id, topic_id, partition_id)
+            .await
+    }
+
+    async fn store_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        offset: u64,
+        ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        self.client
+            .read()
+            .await
+            .store_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, offset, ack)
+            .await
+    }
+
+    async fn delete_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        self.client
+            .read()
+            .await
+            .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
             .await
     }
 }

@@ -19,7 +19,7 @@
 use crate::client_wrappers::client_wrapper::ClientWrapper;
 use async_trait::async_trait;
 use iggy_common::ConsumerOffsetClient;
-use iggy_common::{Consumer, ConsumerOffsetInfo, Identifier, IggyError};
+use iggy_common::{AckLevel, Consumer, ConsumerOffsetInfo, Identifier, IggyError};
 
 #[async_trait]
 impl ConsumerOffsetClient for ClientWrapper {
@@ -127,6 +127,116 @@ impl ConsumerOffsetClient for ClientWrapper {
             ClientWrapper::WebSocket(client) => {
                 client
                     .delete_consumer_offset(consumer, stream_id, topic_id, partition_id)
+                    .await
+            }
+        }
+    }
+
+    async fn store_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        offset: u64,
+        ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        match self {
+            ClientWrapper::Iggy(client) => {
+                client
+                    .store_consumer_offset_v2(
+                        consumer,
+                        stream_id,
+                        topic_id,
+                        partition_id,
+                        offset,
+                        ack,
+                    )
+                    .await
+            }
+            ClientWrapper::Http(client) => {
+                client
+                    .store_consumer_offset_v2(
+                        consumer,
+                        stream_id,
+                        topic_id,
+                        partition_id,
+                        offset,
+                        ack,
+                    )
+                    .await
+            }
+            ClientWrapper::Tcp(client) => {
+                client
+                    .store_consumer_offset_v2(
+                        consumer,
+                        stream_id,
+                        topic_id,
+                        partition_id,
+                        offset,
+                        ack,
+                    )
+                    .await
+            }
+            ClientWrapper::Quic(client) => {
+                client
+                    .store_consumer_offset_v2(
+                        consumer,
+                        stream_id,
+                        topic_id,
+                        partition_id,
+                        offset,
+                        ack,
+                    )
+                    .await
+            }
+            ClientWrapper::WebSocket(client) => {
+                client
+                    .store_consumer_offset_v2(
+                        consumer,
+                        stream_id,
+                        topic_id,
+                        partition_id,
+                        offset,
+                        ack,
+                    )
+                    .await
+            }
+        }
+    }
+
+    async fn delete_consumer_offset_v2(
+        &self,
+        consumer: &Consumer,
+        stream_id: &Identifier,
+        topic_id: &Identifier,
+        partition_id: Option<u32>,
+        ack: AckLevel,
+    ) -> Result<(), IggyError> {
+        match self {
+            ClientWrapper::Iggy(client) => {
+                client
+                    .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
+                    .await
+            }
+            ClientWrapper::Http(client) => {
+                client
+                    .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
+                    .await
+            }
+            ClientWrapper::Tcp(client) => {
+                client
+                    .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
+                    .await
+            }
+            ClientWrapper::Quic(client) => {
+                client
+                    .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
+                    .await
+            }
+            ClientWrapper::WebSocket(client) => {
+                client
+                    .delete_consumer_offset_v2(consumer, stream_id, topic_id, partition_id, ack)
                     .await
             }
         }
