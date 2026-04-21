@@ -15,13 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::format::{finite_or, nan_safe_cmp};
 use bench_dashboard_shared::BenchmarkReportLight;
-use bench_report::{
-    benchmark_kind::BenchmarkKind, numeric_parameter::BenchmarkNumericParameter,
-    transport::BenchmarkTransport,
-};
+use bench_report::benchmark_kind::BenchmarkKind;
+use chrono::{DateTime, Duration};
 use gloo::console::log;
-use std::{collections::BTreeMap, rc::Rc};
+use std::collections::BTreeMap;
+use std::rc::Rc;
 use yew::prelude::*;
 
 /// Represents the state of benchmarks in the application
@@ -39,40 +39,7 @@ pub struct BenchmarkState {
     pub current_gitref: Option<String>,
 }
 
-/// Helper struct to compare benchmark parameters
-#[derive(Debug)]
-struct BenchmarkParams<'a> {
-    message_size: BenchmarkNumericParameter,
-    message_batches: u64,
-    messages_per_batch: BenchmarkNumericParameter,
-    transport: BenchmarkTransport,
-    remark: &'a Option<String>,
-}
-
 impl BenchmarkState {
-    /// Extract benchmark parameters for comparison
-    fn extract_benchmark_params<'a>(
-        &self,
-        benchmark: &'a BenchmarkReportLight,
-    ) -> BenchmarkParams<'a> {
-        BenchmarkParams {
-            message_size: benchmark.params.message_size,
-            message_batches: benchmark.params.message_batches,
-            messages_per_batch: benchmark.params.messages_per_batch,
-            transport: benchmark.params.transport,
-            remark: &benchmark.params.remark,
-        }
-    }
-
-    /// Compare benchmark parameters
-    fn params_match(&self, benchmark: &BenchmarkReportLight, params: &BenchmarkParams) -> bool {
-        benchmark.params.message_size == params.message_size
-            && benchmark.params.message_batches == params.message_batches
-            && benchmark.params.messages_per_batch == params.messages_per_batch
-            && benchmark.params.transport == params.transport
-            && benchmark.params.remark == *params.remark
-    }
-
     /// Log the result of benchmark selection
     fn log_selection_result(
         selected_kind: &BenchmarkKind,
@@ -100,12 +67,8 @@ impl Reducible for BenchmarkState {
             BenchmarkAction::SelectBenchmark(benchmark) => {
                 self.handle_benchmark_selection(*benchmark)
             }
-            BenchmarkAction::SelectBenchmarkKind(kind) => self.handle_kind_selection(kind),
             BenchmarkAction::SetBenchmarksForGitref(benchmarks, hardware, gitref) => {
                 self.handle_gitref_benchmarks(benchmarks, hardware, gitref)
-            }
-            BenchmarkAction::SelectBenchmarkByParamsIdentifier(params_identifier) => {
-                self.handle_benchmark_selection_by_params_identifier(&params_identifier)
             }
         };
 
@@ -161,36 +124,6 @@ impl BenchmarkState {
         new_state
     }
 
-    /// Handle benchmark kind selection action
-    fn handle_kind_selection(&self, kind: BenchmarkKind) -> BenchmarkState {
-        log!(format!("Kind changed: {:?}", kind));
-
-        let mut next_state = BenchmarkState {
-            selected_kind: kind,
-            selected_benchmark: None,
-            ..(*self).clone()
-        };
-
-        if let Some(benchmarks) = self.entries.get(&kind) {
-            next_state.selected_benchmark = if let Some(current) = &self.selected_benchmark {
-                let params = self.extract_benchmark_params(current);
-                benchmarks
-                    .iter()
-                    .find(|b| self.params_match(b, &params))
-                    .or_else(|| {
-                        log!("No matching benchmark found with the same parameters, selecting first available entry");
-                        benchmarks.first()
-                    })
-                    .cloned()
-            } else {
-                log!("No previous selection, selecting first available benchmark");
-                benchmarks.first().cloned()
-            };
-        }
-
-        next_state
-    }
-
     /// Handle setting benchmarks for gitref action
     fn handle_gitref_benchmarks(
         &self,
@@ -219,18 +152,29 @@ impl BenchmarkState {
         let gitref_context_changed = Some(gitref_for_entries.clone()) != self.current_gitref;
 
         if hardware_context_changed || gitref_context_changed {
-            log!(format!(
-                "BenchmarkState: Context changed. HW: {:?}->{}. GitRef: {:?}->{}. Picking first available benchmark from new entries.",
-                self.current_hardware, hardware, self.current_gitref, gitref_for_entries
-            ));
-
-            let best = Self::find_best_benchmark(&entries);
-            if let Some(best) = best {
-                new_selected_benchmark = Some(best.clone());
-                new_selected_kind = best.params.benchmark_kind;
+            if let Some(current) = &self.selected_benchmark
+                && let Some(retained) = entries
+                    .values()
+                    .flatten()
+                    .find(|candidate| candidate.uuid == current.uuid)
+            {
+                log!(format!(
+                    "BenchmarkState: Context changed but retaining current selection {} by UUID.",
+                    current.uuid
+                ));
+                new_selected_benchmark = Some(retained.clone());
+                new_selected_kind = retained.params.benchmark_kind;
             } else {
-                // No entries at all, reset kind to default
-                new_selected_kind = BenchmarkKind::default();
+                log!(format!(
+                    "BenchmarkState: Context changed. HW: {:?}->{}. GitRef: {:?}->{}. Picking best.",
+                    self.current_hardware, hardware, self.current_gitref, gitref_for_entries
+                ));
+                if let Some(best) = self.find_best_benchmark(&entries) {
+                    new_selected_benchmark = Some(best.clone());
+                    new_selected_kind = best.params.benchmark_kind;
+                } else {
+                    new_selected_kind = BenchmarkKind::default();
+                }
             }
         } else {
             // Context (HW and GitRef) has NOT changed. Try to retain selection.
@@ -292,74 +236,70 @@ impl BenchmarkState {
         }
     }
 
-    /// Select a benchmark by its params identifier
-    fn handle_benchmark_selection_by_params_identifier(
-        &self,
-        params_identifier: &str,
-    ) -> BenchmarkState {
-        let mut found_benchmark: Option<BenchmarkReportLight> = None;
-        let mut found_kind: Option<BenchmarkKind> = None;
-
-        for (kind, reports) in &self.entries {
-            if let Some(report) = reports
-                .iter()
-                .find(|r| r.params.params_identifier == params_identifier)
-            {
-                found_benchmark = Some(report.clone());
-                found_kind = Some(*kind);
-                break;
-            }
-        }
-
-        if let Some(bm) = found_benchmark {
-            let new_kind = found_kind.unwrap();
-            log!(format!(
-                "Selected benchmark by params identifier: {:?} (kind={})",
-                bm.params.params_identifier,
-                format!("{:?}", new_kind)
-            ));
-            BenchmarkState {
-                selected_benchmark: Some(bm),
-                selected_kind: new_kind,
-                ..(*self).clone()
-            }
-        } else {
-            log!(format!(
-                "No matching benchmark with params identifier {} found in state entries",
-                params_identifier
-            ));
-            self.clone()
-        }
-    }
-
+    /// Pick a sensible default benchmark from the freshest run batch.
+    ///
+    /// Scopes to `self.selected_kind` when that kind has entries (keeps the default
+    /// consistent with the active sidebar tab); otherwise falls back to all entries.
     fn find_best_benchmark(
-        benchmarks: &BTreeMap<BenchmarkKind, Vec<BenchmarkReportLight>>,
+        &self,
+        entries: &BTreeMap<BenchmarkKind, Vec<BenchmarkReportLight>>,
     ) -> Option<BenchmarkReportLight> {
-        benchmarks
-            .values()
+        let in_kind: Vec<&BenchmarkReportLight> = entries
+            .get(&self.selected_kind)
+            .into_iter()
             .flatten()
-            .max_by_key(|bm| {
-                bm.group_metrics
-                    .first()
-                    .unwrap()
-                    .summary
-                    .average_p99_latency_ms as u64
-            })
-            .cloned()
+            .collect();
+        let scoped: Vec<&BenchmarkReportLight> = if in_kind.is_empty() {
+            entries.values().flatten().collect()
+        } else {
+            in_kind
+        };
+        pick_best_from_recent_batch(&scoped)
     }
 }
 
-/// Actions that can be performed on the benchmark state
+/// From a set of benchmarks, pick the one that best represents "current peak":
+/// restrict to runs within 2h of the latest timestamp (avoids UTC day-split artifacts
+/// on overnight benchmark sweeps), then pick lowest P99 latency; ties broken by
+/// highest total throughput.
+pub fn pick_best_from_recent_batch(
+    benchmarks: &[&BenchmarkReportLight],
+) -> Option<BenchmarkReportLight> {
+    let latest_timestamp = benchmarks
+        .iter()
+        .filter_map(|benchmark| DateTime::parse_from_rfc3339(&benchmark.timestamp).ok())
+        .max()?;
+    let window_start = latest_timestamp - Duration::hours(2);
+
+    benchmarks
+        .iter()
+        .copied()
+        .filter(|benchmark| {
+            DateTime::parse_from_rfc3339(&benchmark.timestamp)
+                .map(|timestamp| timestamp >= window_start)
+                .unwrap_or(false)
+        })
+        .min_by(|left, right| {
+            let metrics = |report: &BenchmarkReportLight| {
+                report.group_metrics.first().map(|group| {
+                    (
+                        finite_or(group.summary.average_p99_latency_ms, f64::INFINITY),
+                        finite_or(group.summary.total_throughput_megabytes_per_second, 0.0),
+                    )
+                })
+            };
+            let (left_p99, left_throughput) = metrics(left).unwrap_or((f64::INFINITY, 0.0));
+            let (right_p99, right_throughput) = metrics(right).unwrap_or((f64::INFINITY, 0.0));
+            nan_safe_cmp(left_p99, right_p99)
+                .then_with(|| nan_safe_cmp(right_throughput, left_throughput))
+        })
+        .cloned()
+}
+
 #[derive(Debug)]
 pub enum BenchmarkAction {
-    /// Select a specific benchmark
     SelectBenchmark(Box<Option<BenchmarkReportLight>>),
-    /// Select a benchmark kind
-    SelectBenchmarkKind(BenchmarkKind),
-    /// Set benchmarks for a specific git reference
     SetBenchmarksForGitref(Vec<BenchmarkReportLight>, String, String),
-    /// Select a benchmark by its params identifier
-    SelectBenchmarkByParamsIdentifier(String),
 }
 
 /// Context for managing benchmark state
@@ -400,4 +340,87 @@ pub fn benchmark_provider(props: &BenchmarkProviderProps) -> Html {
 #[hook]
 pub fn use_benchmark() -> BenchmarkContext {
     use_context::<BenchmarkContext>().expect("Benchmark context not found")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bench_dashboard_shared::BenchmarkGroupMetricsLight;
+    use bench_report::group_metrics_kind::GroupMetricsKind;
+    use bench_report::group_metrics_summary::BenchmarkGroupMetricsSummary;
+
+    #[test]
+    fn given_empty_slice_when_picking_best_should_return_none() {
+        let input: Vec<&BenchmarkReportLight> = Vec::new();
+        assert!(pick_best_from_recent_batch(&input).is_none());
+    }
+
+    #[test]
+    fn given_runs_within_window_when_picking_should_return_lowest_p99() {
+        let a = benchmark("2026-04-21T10:00:00Z", 5.0, 100.0);
+        let b = benchmark("2026-04-21T10:30:00Z", 2.0, 80.0);
+        let c = benchmark("2026-04-21T11:00:00Z", 3.5, 120.0);
+        let picked = pick_best_from_recent_batch(&[&a, &b, &c]).expect("expected a pick");
+        assert_eq!(picked.timestamp, b.timestamp);
+    }
+
+    #[test]
+    fn given_tie_on_p99_when_picking_should_break_tie_on_throughput() {
+        let low_tput = benchmark("2026-04-21T10:00:00Z", 2.0, 100.0);
+        let high_tput = benchmark("2026-04-21T10:10:00Z", 2.0, 200.0);
+        let picked = pick_best_from_recent_batch(&[&low_tput, &high_tput]).expect("expected pick");
+        assert_eq!(picked.timestamp, high_tput.timestamp);
+    }
+
+    #[test]
+    fn given_runs_outside_window_when_picking_should_ignore_old_runs() {
+        let old = benchmark("2026-04-20T10:00:00Z", 1.0, 500.0);
+        let fresh_slow = benchmark("2026-04-21T12:00:00Z", 10.0, 100.0);
+        let fresh_fast = benchmark("2026-04-21T12:30:00Z", 5.0, 90.0);
+        let picked = pick_best_from_recent_batch(&[&old, &fresh_slow, &fresh_fast])
+            .expect("expected a pick");
+        assert_eq!(picked.timestamp, fresh_fast.timestamp);
+    }
+
+    #[test]
+    fn given_nan_p99_when_picking_should_prefer_finite_values() {
+        let mut nan_run = benchmark("2026-04-21T10:00:00Z", 0.0, 100.0);
+        nan_run.group_metrics[0].summary.average_p99_latency_ms = f64::NAN;
+        let good = benchmark("2026-04-21T10:10:00Z", 3.0, 80.0);
+        let picked = pick_best_from_recent_batch(&[&nan_run, &good]).expect("expected a pick");
+        assert_eq!(picked.timestamp, good.timestamp);
+    }
+
+    fn benchmark(timestamp: &str, p99_ms: f64, throughput_mb_s: f64) -> BenchmarkReportLight {
+        let mut report = BenchmarkReportLight {
+            timestamp: timestamp.to_string(),
+            ..Default::default()
+        };
+        report.group_metrics.push(BenchmarkGroupMetricsLight {
+            summary: summary_with(throughput_mb_s, p99_ms),
+            latency_distribution: None,
+        });
+        report
+    }
+
+    fn summary_with(throughput_mb_s: f64, p99_ms: f64) -> BenchmarkGroupMetricsSummary {
+        BenchmarkGroupMetricsSummary {
+            kind: GroupMetricsKind::Producers,
+            total_throughput_megabytes_per_second: throughput_mb_s,
+            total_throughput_messages_per_second: 0.0,
+            average_throughput_megabytes_per_second: 0.0,
+            average_throughput_messages_per_second: 0.0,
+            average_p50_latency_ms: 0.0,
+            average_p90_latency_ms: 0.0,
+            average_p95_latency_ms: 0.0,
+            average_p99_latency_ms: p99_ms,
+            average_p999_latency_ms: 0.0,
+            average_p9999_latency_ms: 0.0,
+            average_latency_ms: 0.0,
+            average_median_latency_ms: 0.0,
+            min_latency_ms: 0.0,
+            max_latency_ms: 0.0,
+            std_dev_latency_ms: 0.0,
+        }
+    }
 }
