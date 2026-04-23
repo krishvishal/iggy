@@ -18,7 +18,6 @@
 
 use crate::{Consumer, ConsumerOffsetInfo, Identifier, IggyError};
 use async_trait::async_trait;
-use iggy_binary_protocol::AckLevel;
 
 /// This trait defines the methods to interact with the consumer offset module.
 #[async_trait]
@@ -53,35 +52,5 @@ pub trait ConsumerOffsetClient {
         stream_id: &Identifier,
         topic_id: &Identifier,
         partition_id: Option<u32>,
-    ) -> Result<(), IggyError>;
-
-    /// Store the consumer offset with an explicit acknowledgement policy
-    /// (`AckLevel::NoAck` for leader-local, `AckLevel::Quorum` for
-    /// consensus-committed). The v1 `store_consumer_offset` is equivalent
-    /// to calling this with `AckLevel::Quorum`.
-    ///
-    /// Authentication is required, and the permission to poll the messages.
-    async fn store_consumer_offset_v2(
-        &self,
-        consumer: &Consumer,
-        stream_id: &Identifier,
-        topic_id: &Identifier,
-        partition_id: Option<u32>,
-        offset: u64,
-        ack: AckLevel,
-    ) -> Result<(), IggyError>;
-
-    /// Delete the consumer offset with an explicit acknowledgement policy.
-    /// The v1 `delete_consumer_offset` is equivalent to calling this with
-    /// `AckLevel::Quorum`.
-    ///
-    /// Authentication is required, and the permission to poll the messages.
-    async fn delete_consumer_offset_v2(
-        &self,
-        consumer: &Consumer,
-        stream_id: &Identifier,
-        topic_id: &Identifier,
-        partition_id: Option<u32>,
-        ack: AckLevel,
     ) -> Result<(), IggyError>;
 }

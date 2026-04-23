@@ -23,7 +23,6 @@ use crate::binary::handlers::consumer_offsets::COMPONENT;
 use crate::shard::IggyShard;
 use crate::streaming::session::Session;
 use err_trail::ErrContext;
-use iggy_binary_protocol::AckLevel;
 use iggy_binary_protocol::requests::consumer_offsets::StoreConsumerOffsetRequest;
 use iggy_common::IggyError;
 use iggy_common::SenderKind;
@@ -55,7 +54,6 @@ pub async fn handle_store_consumer_offset(
             topic,
             req.partition_id,
             req.offset,
-            AckLevel::Quorum,
         )
         .await
         .error(|e: &IggyError| format!("{COMPONENT} (error: {e}) - failed to store consumer offset for stream_id: {}, topic_id: {}, partition_id: {:?}, offset: {}, session: {}",
