@@ -21,15 +21,12 @@ use crate::wire_conversions::{consumer_to_wire, identifier_to_wire};
 use crate::{
     BinaryClient, Consumer, ConsumerOffsetClient, ConsumerOffsetInfo, Identifier, IggyError,
 };
-use iggy_binary_protocol::AckLevel;
 use iggy_binary_protocol::codec::WireEncode;
 use iggy_binary_protocol::codes::{
-    DELETE_CONSUMER_OFFSET_2_CODE, DELETE_CONSUMER_OFFSET_CODE, GET_CONSUMER_OFFSET_CODE,
-    STORE_CONSUMER_OFFSET_2_CODE, STORE_CONSUMER_OFFSET_CODE,
+    DELETE_CONSUMER_OFFSET_CODE, GET_CONSUMER_OFFSET_CODE, STORE_CONSUMER_OFFSET_CODE,
 };
 use iggy_binary_protocol::requests::consumer_offsets::{
-    DeleteConsumerOffset2Request, DeleteConsumerOffsetRequest, GetConsumerOffsetRequest,
-    StoreConsumerOffset2Request, StoreConsumerOffsetRequest,
+    DeleteConsumerOffsetRequest, GetConsumerOffsetRequest, StoreConsumerOffsetRequest,
 };
 use iggy_binary_protocol::responses::consumer_offsets::get_consumer_offset::ConsumerOffsetResponse;
 
@@ -110,62 +107,6 @@ impl<B: BinaryClient> ConsumerOffsetClient for B {
                 stream_id: wire_stream_id,
                 topic_id: wire_topic_id,
                 partition_id,
-            }
-            .to_bytes(),
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn store_consumer_offset_v2(
-        &self,
-        consumer: &Consumer,
-        stream_id: &Identifier,
-        topic_id: &Identifier,
-        partition_id: Option<u32>,
-        offset: u64,
-        ack: AckLevel,
-    ) -> Result<(), IggyError> {
-        fail_if_not_authenticated(self).await?;
-        let wire_consumer = consumer_to_wire(consumer)?;
-        let wire_stream_id = identifier_to_wire(stream_id)?;
-        let wire_topic_id = identifier_to_wire(topic_id)?;
-        self.send_raw_with_response(
-            STORE_CONSUMER_OFFSET_2_CODE,
-            StoreConsumerOffset2Request {
-                consumer: wire_consumer,
-                stream_id: wire_stream_id,
-                topic_id: wire_topic_id,
-                partition_id,
-                offset,
-                ack,
-            }
-            .to_bytes(),
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn delete_consumer_offset_v2(
-        &self,
-        consumer: &Consumer,
-        stream_id: &Identifier,
-        topic_id: &Identifier,
-        partition_id: Option<u32>,
-        ack: AckLevel,
-    ) -> Result<(), IggyError> {
-        fail_if_not_authenticated(self).await?;
-        let wire_consumer = consumer_to_wire(consumer)?;
-        let wire_stream_id = identifier_to_wire(stream_id)?;
-        let wire_topic_id = identifier_to_wire(topic_id)?;
-        self.send_raw_with_response(
-            DELETE_CONSUMER_OFFSET_2_CODE,
-            DeleteConsumerOffset2Request {
-                consumer: wire_consumer,
-                stream_id: wire_stream_id,
-                topic_id: wire_topic_id,
-                partition_id,
-                ack,
             }
             .to_bytes(),
         )

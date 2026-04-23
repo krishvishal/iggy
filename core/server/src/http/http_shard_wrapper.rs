@@ -17,7 +17,6 @@
 
 use std::rc::Rc;
 
-use iggy_binary_protocol::AckLevel;
 use iggy_common::{
     Consumer, ConsumerOffsetInfo, Identifier, IggyError, Partitioning, PartitioningKind,
 };
@@ -111,7 +110,6 @@ impl HttpSafeShard {
             topic,
             partition_id,
             offset,
-            AckLevel::Quorum,
         ));
         let _result = future.await?;
         Ok(())
@@ -131,7 +129,6 @@ impl HttpSafeShard {
             consumer,
             topic,
             partition_id,
-            AckLevel::Quorum,
         ));
         let _result = future.await?;
         Ok(())

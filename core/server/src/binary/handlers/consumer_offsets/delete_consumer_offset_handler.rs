@@ -21,7 +21,6 @@ use crate::binary::handlers::consumer_offsets::COMPONENT;
 use crate::shard::IggyShard;
 use crate::streaming::session::Session;
 use err_trail::ErrContext;
-use iggy_binary_protocol::AckLevel;
 use iggy_binary_protocol::requests::consumer_offsets::DeleteConsumerOffsetRequest;
 use iggy_common::{IggyError, SenderKind};
 use std::rc::Rc;
@@ -47,13 +46,7 @@ pub async fn handle_delete_consumer_offset(
         &topic_id,
     )?;
     shard
-        .delete_consumer_offset(
-            session.client_id,
-            consumer,
-            topic,
-            req.partition_id,
-            AckLevel::Quorum,
-        )
+        .delete_consumer_offset(session.client_id, consumer, topic, req.partition_id)
         .await
         .error(|e: &IggyError| format!("{COMPONENT} (error: {e}) - failed to delete consumer offset for topic with ID: {} in stream with ID: {} partition ID: {:#?}, session: {}",
             topic_id, stream_id, req.partition_id, session
