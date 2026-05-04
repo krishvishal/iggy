@@ -24,9 +24,8 @@ use bytes::{BufMut, BytesMut};
 
 /// `DeleteConsumerOffset` v2 request.
 ///
-/// Extends v1 with an `ack` field that lets the client pick the commit
-/// guarantee: `NoAck` for leader-local (fast) writes, `Quorum` for
-/// consensus-committed writes.
+/// Adds an `ack` byte: `NoAck` = leader-local fast path, `Quorum` = VSR
+/// pipeline.
 ///
 /// Wire format:
 /// ```text

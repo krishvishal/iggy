@@ -181,11 +181,8 @@ impl SimClient {
         self.build_request_with_namespace(Operation::DeleteConsumerOffset, &payload, namespace)
     }
 
-    /// v2 of `store_consumer_offset` carrying an explicit `AckLevel` byte.
-    ///
-    /// Only the simulator emits this opcode today; the partitions plane
-    /// accepts it alongside v1. The ack byte is reserved for future
-    /// cluster-side commit-timing semantics.
+    /// v2 of `store_consumer_offset` with an `AckLevel` byte. `NoAck` takes
+    /// the primary's fast path (no replication); `Quorum` goes through VSR.
     pub fn store_consumer_offset_v2(
         &self,
         namespace: IggyNamespace,
