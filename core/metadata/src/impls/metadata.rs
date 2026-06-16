@@ -38,7 +38,7 @@ use iggy_binary_protocol::requests::topics::CreateTopicRequest as WireCreateTopi
 use iggy_binary_protocol::requests::topics::CreateTopicWithAssignmentsRequest as PersistedCreateTopicRequest;
 use iggy_binary_protocol::{
     Command2, ConsensusHeader, GenericHeader, Operation, PrepareHeader, PrepareOkHeader,
-    RequestHeader, WireDecode, WireEncode, WireName,
+    ReplyHeader, RequestHeader, WireDecode, WireEncode, WireName,
 };
 use iggy_common::IggyError;
 use iggy_common::UserId;
@@ -974,47 +974,7 @@ where
             .prepare_request(request)
             .expect("Operation::Register is client-allowed; prepare projection cannot fail");
 
-        // Subscribe before await so receiver registers before any self-loopback
-        // ack fires. compio is single-threaded; explicit anyway.
-        consensus.verify_pipeline();
-        // Snapshot (view, commit_min) pre-subscribe. Validate it after
-        // `on_replicate` returns and again on receiver completion: another
-        // task could mutate either during the awaits and silently invalidate
-        // the gate, with release builds proceeding on a stale view-state.
-        let view_snapshot = consensus.view();
-        let commit_min_snapshot = consensus.commit_min();
-        let receiver = consensus.pipeline_message_with_subscriber(PlaneKind::Metadata, &prepare);
-        // Re-check gate post-subscribe: `pipeline_message_with_subscriber`
-        // can drop the borrow. No commit-max advance flips the gate today;
-        // pin against future await between check and dispatch.
-        debug_assert!(
-            is_caught_up_primary(consensus),
-            "submit_register_in_process: gate flipped between check and dispatch"
-        );
-        self.on_replicate(prepare).await;
-        debug_assert!(
-            consensus.view() == view_snapshot && consensus.commit_min() == commit_min_snapshot,
-            "submit_register_in_process: view/commit_min advanced across on_replicate await"
-        );
-        let mut loopback = Vec::new();
-        consensus.drain_loopback_into(&mut loopback);
-        for message in loopback {
-            match message.header().command {
-                Command2::PrepareOk => match message.try_into_typed::<PrepareOkHeader>() {
-                    Ok(prepare_ok) => self.on_ack(prepare_ok).await,
-                    Err(error) => warn!(
-                        error = %error,
-                        "dropping malformed PrepareOk from metadata loopback queue"
-                    ),
-                },
-                command => warn!(
-                    ?command,
-                    "dropping unexpected message from metadata loopback queue"
-                ),
-            }
-        }
-
-        match receiver.await {
+        match self.dispatch_prepare_and_await(consensus, prepare).await {
             Ok(reply) => Ok(reply.header().commit),
             Err(Canceled) => {
                 // View-change cancel. Re-check is correct-by-VSR: any
@@ -1103,38 +1063,7 @@ where
             .prepare_request(request)
             .expect("Operation::Logout is client-allowed; prepare projection cannot fail");
 
-        consensus.verify_pipeline();
-        let view_snapshot = consensus.view();
-        let commit_min_snapshot = consensus.commit_min();
-        let receiver = consensus.pipeline_message_with_subscriber(PlaneKind::Metadata, &prepare);
-        debug_assert!(
-            is_caught_up_primary(consensus),
-            "submit_logout_in_process: gate flipped between check and dispatch"
-        );
-        self.on_replicate(prepare).await;
-        debug_assert!(
-            consensus.view() == view_snapshot && consensus.commit_min() == commit_min_snapshot,
-            "submit_logout_in_process: view/commit_min advanced across on_replicate await"
-        );
-        let mut loopback = Vec::new();
-        consensus.drain_loopback_into(&mut loopback);
-        for message in loopback {
-            match message.header().command {
-                Command2::PrepareOk => match message.try_into_typed::<PrepareOkHeader>() {
-                    Ok(prepare_ok) => self.on_ack(prepare_ok).await,
-                    Err(error) => warn!(
-                        error = %error,
-                        "dropping malformed PrepareOk from metadata loopback queue"
-                    ),
-                },
-                command => warn!(
-                    ?command,
-                    "dropping unexpected message from metadata loopback queue"
-                ),
-            }
-        }
-
-        match receiver.await {
+        match self.dispatch_prepare_and_await(consensus, prepare).await {
             Ok(reply) => Ok(reply.header().commit),
             Err(Canceled) => {
                 if self.client_table.borrow().get_session(client_id).is_none() {
@@ -1197,7 +1126,15 @@ where
             return Err(MetadataSubmitError::PipelineFull);
         }
 
-        let body = DeletePersonalAccessTokenRequest { user_id, name }.to_bytes();
+        let body = DeletePersonalAccessTokenRequest {
+            user_id,
+            name,
+            // Expiry-gated: a token recreated under the same name between the
+            // cleaner's snapshot and this commit must not be purged. Apply
+            // re-checks the stored token's expiry against the prepare timestamp.
+            only_if_expired: true,
+        }
+        .to_bytes();
         // Build the prepare directly so the `client = 0` header skips the
         // client-header validation in `prepare_request` / `Project::project`
         // (the in-process path `build_prepare_message` documents).
@@ -1213,38 +1150,7 @@ where
             &body,
         );
 
-        consensus.verify_pipeline();
-        let view_snapshot = consensus.view();
-        let commit_min_snapshot = consensus.commit_min();
-        let receiver = consensus.pipeline_message_with_subscriber(PlaneKind::Metadata, &prepare);
-        debug_assert!(
-            is_caught_up_primary(consensus),
-            "submit_delete_personal_access_token_in_process: gate flipped between check and dispatch"
-        );
-        self.on_replicate(prepare).await;
-        debug_assert!(
-            consensus.view() == view_snapshot && consensus.commit_min() == commit_min_snapshot,
-            "submit_delete_personal_access_token_in_process: view/commit_min advanced across on_replicate await"
-        );
-        let mut loopback = Vec::new();
-        consensus.drain_loopback_into(&mut loopback);
-        for message in loopback {
-            match message.header().command {
-                Command2::PrepareOk => match message.try_into_typed::<PrepareOkHeader>() {
-                    Ok(prepare_ok) => self.on_ack(prepare_ok).await,
-                    Err(error) => warn!(
-                        error = %error,
-                        "dropping malformed PrepareOk from metadata loopback queue"
-                    ),
-                },
-                command => warn!(
-                    ?command,
-                    "dropping unexpected message from metadata loopback queue"
-                ),
-            }
-        }
-
-        match receiver.await {
+        match self.dispatch_prepare_and_await(consensus, prepare).await {
             Ok(reply) => Ok(reply.header().commit),
             Err(Canceled) => Err(MetadataSubmitError::Canceled),
         }
@@ -1331,18 +1237,50 @@ where
             .prepare_request(message)
             .map_err(|_| MetadataSubmitError::Canceled)?;
 
+        self.dispatch_prepare_and_await(consensus, prepare)
+            .await
+            .map(server_common::Message::into_generic)
+            .map_err(|Canceled| MetadataSubmitError::Canceled)
+    }
+
+    /// Subscribe to a prepared metadata write, dispatch it into the pipeline,
+    /// drain the self-loopback acks, and await the committed reply.
+    ///
+    /// Shared tail of every in-process submit path
+    /// ([`Self::submit_register_in_process`],
+    /// [`Self::submit_logout_in_process`], [`Self::submit_request_in_process`],
+    /// and [`Self::submit_delete_personal_access_token_in_process`]). The
+    /// caller owns its own preflight / dedup gate and builds `prepare`; this
+    /// owns the dispatch mechanics. The view-change `Canceled` is returned
+    /// verbatim so each caller can apply its own idempotent recheck.
+    ///
+    /// Subscribes before dispatch so the receiver is registered before any
+    /// self-loopback ack fires (compio is single-threaded; explicit anyway).
+    #[allow(clippy::future_not_send)]
+    async fn dispatch_prepare_and_await(
+        &self,
+        consensus: &VsrConsensus<B>,
+        prepare: Message<PrepareHeader>,
+    ) -> Result<Message<ReplyHeader>, Canceled> {
         consensus.verify_pipeline();
+        // Snapshot (view, commit_min) pre-subscribe. Validate it after
+        // `on_replicate` returns: another task could mutate either during the
+        // await and silently invalidate the catch-up gate, with release builds
+        // proceeding on a stale view-state.
         let view_snapshot = consensus.view();
         let commit_min_snapshot = consensus.commit_min();
         let receiver = consensus.pipeline_message_with_subscriber(PlaneKind::Metadata, &prepare);
+        // Re-check gate post-subscribe: `pipeline_message_with_subscriber`
+        // can drop the borrow. No commit-max advance flips the gate today;
+        // pin against a future await between check and dispatch.
         debug_assert!(
             is_caught_up_primary(consensus),
-            "submit_request_in_process: gate flipped between check and dispatch"
+            "dispatch_prepare_and_await: gate flipped between check and dispatch"
         );
         self.on_replicate(prepare).await;
         debug_assert!(
             consensus.view() == view_snapshot && consensus.commit_min() == commit_min_snapshot,
-            "submit_request_in_process: view/commit_min advanced across on_replicate await"
+            "dispatch_prepare_and_await: view/commit_min advanced across on_replicate await"
         );
         let mut loopback = Vec::new();
         consensus.drain_loopback_into(&mut loopback);
@@ -1362,10 +1300,7 @@ where
             }
         }
 
-        receiver
-            .await
-            .map(server_common::Message::into_generic)
-            .map_err(|Canceled| MetadataSubmitError::Canceled)
+        receiver.await
     }
 
     /// Promote up to `slots_freed` buffered requests into prepares after
@@ -1804,11 +1739,13 @@ where
     // Match `Project::project` (core/consensus/src/impls.rs): the primary
     // stamps wall-clock once here so every replica's `StateHandler::apply`
     // reads the same `created_at`. A `0` stamp would persist a 1970-01-01
-    // `created_at` on every CreateStream/CreateTopic/CreatePartitions, since
-    // submit_delete_personal_access_token_in_process bypasses
-    // `Project::project` and calls this
-    // helper directly. Shared `next_monotonic_timestamp` keeps the in-process
-    // path on the same monotonic-clock guard as the wire path.
+    // `created_at` on every CreateStream/CreateTopic/CreatePartitions. The
+    // in-process callers that bypass `Project::project` build their prepare
+    // through this helper directly (the CreateTopic/CreatePartitions
+    // assignment rewrites, and the PAT-cleaner delete); the stamp is
+    // load-bearing for the creates and inert for the delete, whose apply
+    // ignores it. Shared `next_monotonic_timestamp` keeps the in-process path
+    // on the same monotonic-clock guard as the wire path.
     let timestamp = consensus.next_monotonic_timestamp();
     *new_header = PrepareHeader {
         cluster: consensus.cluster(),

@@ -30,7 +30,27 @@ use metadata::impls::metadata::StreamsFrontend;
 use shard::Receiver;
 use std::rc::Rc;
 use std::time::Duration;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
+
+/// Upper bound on tokens deleted in a single pass. Each delete is its own
+/// replicated consensus round on shard 0, so an uncapped pass over a large
+/// batch (first tick after downtime, or many tokens sharing one expiry) would
+/// monopolize the metadata pipeline. A pass that fills the cap re-runs
+/// immediately instead of waiting a full interval, so a backlog still drains
+/// promptly while yielding between batches.
+const MAX_DELETIONS_PER_PASS: usize = 256;
+
+/// Outcome of one cleanup pass.
+enum Pass {
+    /// Stop was observed mid-pass; the run loop should exit.
+    Stopped,
+    /// A full [`MAX_DELETIONS_PER_PASS`] batch was deleted and more may remain;
+    /// run another pass without waiting for the next tick.
+    HitCap,
+    /// The due tokens were drained (or none were due, or leadership was lost);
+    /// wait for the next tick.
+    Drained,
+}
 
 /// Run the cleaner until `stop` fires. Wakes every `interval`; expiry is
 /// wall-clock driven, so no metadata-commit wake is needed.
@@ -40,28 +60,31 @@ pub async fn run_pat_cleaner(shard: Rc<ServerNgShard>, stop: Receiver<()>, inter
         interval_ms = interval.as_millis(),
         "personal access token cleaner started"
     );
-    loop {
+    'ticks: loop {
         // `Ok(_)`: stop signalled -> exit. `Err(_)`: interval elapsed -> run
-        // a pass, which returns `true` if it saw stop mid-batch so shutdown
-        // need not wait for the next tick.
+        // capped passes until the backlog drains, stop fires, or leadership is
+        // lost, then wait for the next tick.
         match compio::time::timeout(interval, stop.recv()).await {
-            Ok(_) => break,
-            Err(_) => {
-                if clean_expired_tokens(&shard, &stop).await {
-                    break;
+            Ok(_) => break 'ticks,
+            Err(_) => loop {
+                match clean_expired_tokens(&shard, &stop).await {
+                    // Full batch deleted; loop again immediately to keep
+                    // draining without waiting for the next tick.
+                    Pass::HitCap => {}
+                    Pass::Drained => break,
+                    Pass::Stopped => break 'ticks,
                 }
-            }
+            },
         }
     }
     trace!(shard = shard.id, "personal access token cleaner exited");
 }
 
-/// Run one cleanup pass. Returns `true` when shutdown was observed
-/// mid-batch and the caller should stop looping, `false` otherwise.
-async fn clean_expired_tokens(shard: &Rc<ServerNgShard>, stop: &Receiver<()>) -> bool {
+/// Run one cleanup pass, deleting at most [`MAX_DELETIONS_PER_PASS`] tokens.
+async fn clean_expired_tokens(shard: &Rc<ServerNgShard>, stop: &Receiver<()>) -> Pass {
     let metadata = shard.plane.metadata();
     if !metadata.is_caught_up_primary() {
-        return false;
+        return Pass::Drained;
     }
 
     let now = IggyTimestamp::now();
@@ -73,12 +96,13 @@ async fn clean_expired_tokens(shard: &Rc<ServerNgShard>, stop: &Receiver<()>) ->
         .read(|users| users.expired_personal_access_tokens(now));
 
     if expired.is_empty() {
-        return false;
+        return Pass::Drained;
     }
 
-    let mut removed = 0u32;
+    let due = expired.len();
+    let mut removed = 0usize;
     let mut stop_requested = false;
-    for (user_id, name) in expired {
+    for (user_id, name) in expired.into_iter().take(MAX_DELETIONS_PER_PASS) {
         // Observe stop between tokens: an in-flight submit is not
         // cancel-safe, so let the current delete finish rather than cut it.
         // Bounds shutdown delay to one submit, not the whole batch.
@@ -86,10 +110,14 @@ async fn clean_expired_tokens(shard: &Rc<ServerNgShard>, stop: &Receiver<()>) ->
             stop_requested = true;
             break;
         }
-        // `name` came from a stored PAT, originally a validated `WireName`,
-        // so reconstruction is infallible.
-        let wire_name = WireName::new(name.as_ref())
-            .expect("stored PAT name was validated as a WireName at creation");
+        // `name` came from a stored PAT, originally a validated `WireName`, so
+        // reconstruction is infallible in practice. Guard anyway: a corrupted
+        // snapshot carrying an invalid name should skip the entry, not panic
+        // the whole cleaner.
+        let Ok(wire_name) = WireName::new(name.as_ref()) else {
+            warn!(user_id, %name, "skipping personal access token with invalid name");
+            continue;
+        };
         match metadata
             .submit_delete_personal_access_token_in_process(user_id, wire_name)
             .await
@@ -111,5 +139,12 @@ async fn clean_expired_tokens(shard: &Rc<ServerNgShard>, stop: &Receiver<()>) ->
     if removed > 0 {
         info!(removed, "removed expired personal access tokens");
     }
-    stop_requested
+
+    if stop_requested {
+        Pass::Stopped
+    } else if due > MAX_DELETIONS_PER_PASS && removed == MAX_DELETIONS_PER_PASS {
+        Pass::HitCap
+    } else {
+        Pass::Drained
+    }
 }
