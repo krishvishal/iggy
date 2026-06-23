@@ -562,6 +562,7 @@ mod tests {
     // Regression: DVC must carry commit_max not commit_min - see
     // `handle_start_view_change`.
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn do_view_change_carries_commit_max_not_commit_min() {
         let consensus = VsrConsensus::new(1, 1, 3, 0, NoopBus, LocalPipeline::new());
         consensus.init();
@@ -585,6 +586,7 @@ mod tests {
             Message::<StartViewChangeHeader>::new(std::mem::size_of::<StartViewChangeHeader>())
                 .transmute_header(|_, new: &mut StartViewChangeHeader| {
                     new.command = Command2::StartViewChange;
+                    new.size = std::mem::size_of::<StartViewChangeHeader>() as u32;
                     new.view = 1;
                     new.replica = 0;
                     new.namespace = 0;
@@ -607,6 +609,7 @@ mod tests {
     // op so `DoViewChangeHeader::validate` (commit <= op) does not drop it;
     // dropping a quorum DVC stalls the view change.
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn do_view_change_commit_clamped_to_op_when_commit_max_exceeds_op() {
         use iggy_binary_protocol::{ConsensusHeader, DoViewChangeHeader};
 
@@ -623,6 +626,7 @@ mod tests {
             Message::<StartViewChangeHeader>::new(std::mem::size_of::<StartViewChangeHeader>())
                 .transmute_header(|_, new: &mut StartViewChangeHeader| {
                     new.command = Command2::StartViewChange;
+                    new.size = std::mem::size_of::<StartViewChangeHeader>() as u32;
                     new.view = 1;
                     new.replica = 0;
                     new.namespace = 0;
