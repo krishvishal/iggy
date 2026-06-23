@@ -269,13 +269,33 @@ where
 ///
 /// # Panics
 /// If buffer is not a valid reply.
-#[allow(clippy::cast_possible_truncation)]
 pub fn build_reply_message(
     prepare_header: &PrepareHeader,
     body: &bytes::Bytes,
 ) -> Message<ReplyHeader> {
+    build_reply_message_with(prepare_header, body.len(), |dst| dst.copy_from_slice(body))
+}
+
+/// Builds a reply [`Message`] whose body region is filled in place by `fill`.
+///
+/// Elides the throwaway `Bytes` a caller would otherwise allocate just to have
+/// it copied in here. `fill` is handed the zeroed `body_len`-byte region and
+/// must populate exactly that many bytes. Header fields follow the commit-time
+/// determinism rules of [`build_reply_message`].
+///
+/// # Panics
+/// If buffer is not a valid reply.
+#[allow(clippy::cast_possible_truncation)]
+pub fn build_reply_message_with<F>(
+    prepare_header: &PrepareHeader,
+    body_len: usize,
+    fill: F,
+) -> Message<ReplyHeader>
+where
+    F: FnOnce(&mut [u8]),
+{
     let header_size = std::mem::size_of::<ReplyHeader>();
-    let total_size = header_size + body.len();
+    let total_size = header_size + body_len;
     let mut buffer = bytes::BytesMut::zeroed(total_size);
 
     let header = bytemuck::checked::try_from_bytes_mut::<ReplyHeader>(&mut buffer[..header_size])
@@ -306,9 +326,7 @@ pub fn build_reply_message(
         ..Default::default()
     };
 
-    if !body.is_empty() {
-        buffer[header_size..].copy_from_slice(body);
-    }
+    fill(&mut buffer[header_size..]);
 
     // TODO: drop this copy once replies stop round-tripping through `Bytes`
     // and the binary protocol uses `Owned` end-to-end.
@@ -488,11 +506,13 @@ mod tests {
         fn set_client_forward_fn(&self, _f: message_bus::ClientForwardFn) {}
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn prepare_message(op: u64, parent: u128, checksum: u128) -> Message<PrepareHeader> {
         Message::<PrepareHeader>::new(std::mem::size_of::<PrepareHeader>()).transmute_header(
             |_, new| {
                 *new = PrepareHeader {
                     command: Command2::Prepare,
+                    size: std::mem::size_of::<PrepareHeader>() as u32,
                     op,
                     parent,
                     checksum,
@@ -503,6 +523,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn replicate_preflight_fences_prepare_views() {
         let mut consensus = VsrConsensus::new(1, 0, 3, 0, NoopBus, LocalPipeline::new());
         consensus.init();
@@ -513,6 +534,7 @@ mod tests {
                 |_, new| {
                     *new = PrepareHeader {
                         command: Command2::Prepare,
+                        size: std::mem::size_of::<PrepareHeader>() as u32,
                         op: 1,
                         view,
                         ..Default::default()
