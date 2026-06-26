@@ -29,6 +29,11 @@
 
 use bytes::{Bytes, BytesMut};
 use iggy_binary_protocol::Operation;
+use iggy_binary_protocol::consensus::{RESULT_COUNT_LEN, RESULT_ENTRY_LEN};
+
+/// Decode side of the result section, shared with every client (SDK, simulator)
+/// via `binary_protocol`. Re-exported so server-side callers keep one import.
+pub use iggy_binary_protocol::consensus::result_code;
 
 /// Outcome of applying one committed metadata op.
 ///
@@ -64,9 +69,9 @@ impl ApplyReply {
     #[must_use]
     pub const fn reply_body_len(&self) -> usize {
         if self.code == 0 {
-            4 + self.body.len()
+            RESULT_COUNT_LEN + self.body.len()
         } else {
-            12
+            RESULT_COUNT_LEN + RESULT_ENTRY_LEN
         }
     }
 
@@ -83,12 +88,15 @@ impl ApplyReply {
     /// If `dst.len() != self.reply_body_len()`.
     pub fn write_reply_body(&self, dst: &mut [u8]) {
         if self.code == 0 {
-            dst[..4].copy_from_slice(&0u32.to_le_bytes());
-            dst[4..].copy_from_slice(&self.body);
+            dst[..RESULT_COUNT_LEN].copy_from_slice(&0u32.to_le_bytes());
+            dst[RESULT_COUNT_LEN..].copy_from_slice(&self.body);
         } else {
-            dst[..4].copy_from_slice(&1u32.to_le_bytes());
-            dst[4..8].copy_from_slice(&0u32.to_le_bytes());
-            dst[8..12].copy_from_slice(&self.code.to_le_bytes());
+            // One `{index: 0, result: code}` entry: the two u32 halves of the
+            // 8-byte entry that follows the count.
+            dst[..RESULT_COUNT_LEN].copy_from_slice(&1u32.to_le_bytes());
+            let entry = &mut dst[RESULT_COUNT_LEN..RESULT_COUNT_LEN + RESULT_ENTRY_LEN];
+            entry[..4].copy_from_slice(&0u32.to_le_bytes());
+            entry[4..].copy_from_slice(&self.code.to_le_bytes());
         }
     }
 
@@ -198,33 +206,6 @@ result_enum!(DeletePersonalAccessTokenResult { NotFound = 20 });
 // Consumer groups.
 result_enum!(CreateConsumerGroupResult { NameAlreadyExists = 5004 });
 result_enum!(DeleteConsumerGroupResult { NotFound = 5000 });
-
-/// Leading result code from a reply body, or `None` if it is not a well-formed
-/// result section.
-///
-/// Parses [`ApplyReply::to_reply_body`] output: `[count: u32]` then `count` x
-/// `{index: u32, result: u32}`. Zero `count` is success (`Some(0)`); nonzero
-/// returns the first entry's `result`. `None` if the body is too short for the
-/// `count` or for an entry the `count` claims: a truncated rejection must never
-/// read as `0`, so the caller treats `None` as malformed, never Ok ("classify
-/// never guesses").
-#[must_use]
-pub fn result_code(reply_body: &[u8]) -> Option<u32> {
-    let read_u32 = |offset: usize| -> Option<u32> {
-        reply_body
-            .get(offset..offset + 4)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes)
-    };
-    let count = read_u32(0)?;
-    if count == 0 {
-        Some(0)
-    } else {
-        // First entry's `result` sits at offset 8; a body that cannot hold it
-        // is corruption, not success, so propagate the `None`.
-        read_u32(8)
-    }
-}
 
 /// True if `code` is one this op's result enum declares (`Ok = 0` included).
 ///

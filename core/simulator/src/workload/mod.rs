@@ -34,8 +34,8 @@ pub mod shadow;
 
 use std::collections::HashMap;
 
-use iggy_binary_protocol::{ReplyHeader, RequestHeader};
-use metadata::stm::result::{result_code, result_code_recognized};
+use iggy_binary_protocol::{ReplyHeader, RequestHeader, result_code};
+use metadata::stm::result::result_code_recognized;
 use rand::RngExt;
 use rand_xoshiro::Xoshiro256Plus;
 use rand_xoshiro::rand_core::SeedableRng;
