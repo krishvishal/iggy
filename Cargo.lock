@@ -9395,6 +9395,7 @@ dependencies = [
  "iggy_common",
  "journal",
  "message_bus",
+ "papaya",
  "ringbuffer",
  "server_common",
  "smallvec",
