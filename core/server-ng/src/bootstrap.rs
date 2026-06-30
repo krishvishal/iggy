@@ -971,6 +971,22 @@ async fn shard_main(
         None
     };
 
+    // Segment cleaner: runs on every shard (each replica trims its own log,
+    // primary and backup alike). Local and unreplicated; gated by the shared
+    // data-maintenance config.
+    let segment_cleaner_stop = if config.data_maintenance.messages.cleaner_enabled {
+        let (stop_tx, stop_rx) = channel(1);
+        let cleaner_shard = Rc::clone(&shard);
+        let interval = config.data_maintenance.messages.interval.get_duration();
+        let cleaner_handle = compio::runtime::spawn(async move {
+            crate::segment_cleaner::run_segment_cleaner(cleaner_shard, stop_rx, interval).await;
+        });
+        bus.track_background(cleaner_handle);
+        Some(stop_tx)
+    } else {
+        None
+    };
+
     // Listener fence (see `BootstrapBarrier`). Peers still scan live
     // shared metadata and load their on-disk partitions in
     // `build_shard_for_thread`; the factory-bundle handoff only proves
@@ -1034,6 +1050,9 @@ async fn shard_main(
             if let Some(cleaner_stop_tx) = &pat_cleaner_stop {
                 let _ = cleaner_stop_tx.try_send(());
             }
+            if let Some(tx) = &segment_cleaner_stop {
+                let _ = tx.try_send(());
+            }
             return Err(error);
         }
     }
@@ -1046,6 +1065,9 @@ async fn shard_main(
     }
     if let Some(cleaner_stop_tx) = &pat_cleaner_stop {
         let _ = cleaner_stop_tx.try_send(());
+    }
+    if let Some(tx) = &segment_cleaner_stop {
+        let _ = tx.try_send(());
     }
 
     info!(shard = shard_id, "server-ng shard exited cleanly");
