@@ -34,25 +34,22 @@ pub mod options;
 pub mod oracle;
 pub mod shadow;
 
-use std::collections::{HashMap, HashSet};
-
+use crate::Simulator;
+use crate::client::SimClient;
+use crate::workload::ops::InFlight;
+use actions::Action;
+use auditor::{OnReply, ServerAuditor};
+use effect::SimCommand;
 use iggy_binary_protocol::{ReplyHeader, RequestHeader, result_code};
+use invariants::Invariants;
 use metadata::stm::result::result_code_recognized;
+use options::WorkloadOptions;
 use rand::RngExt;
 use rand_xoshiro::Xoshiro256Plus;
 use rand_xoshiro::rand_core::SeedableRng;
 use server_common::Message;
-
-use crate::Simulator;
-use crate::client::SimClient;
-use actions::Action;
-use auditor::{OnReply, ServerAuditor};
-use effect::SimCommand;
-use invariants::Invariants;
-use options::WorkloadOptions;
 use shadow::Shadow;
-
-use crate::workload::ops::InFlight;
+use std::collections::{HashMap, HashSet};
 
 /// Max in-flight requests per client. Must stay under the consensus
 /// pipeline's queue limits.

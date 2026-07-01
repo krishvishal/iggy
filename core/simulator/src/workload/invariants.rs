@@ -23,12 +23,10 @@
 //! trace and the determinism baseline (`workload_replay_is_deterministic`)
 //! unchanged.
 
-use std::collections::HashMap;
-
-use server_common::sharding::IggyNamespace;
-
 use crate::Simulator;
 use crate::workload::{CLIENT_REQUEST_QUEUE_MAX, Workload};
+use server_common::sharding::IggyNamespace;
+use std::collections::HashMap;
 
 /// Per-(replica, namespace) high-water marks carried across ticks so each new
 /// reading can be compared against the last.

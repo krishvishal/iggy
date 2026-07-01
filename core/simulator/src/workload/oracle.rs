@@ -35,15 +35,13 @@
 //! legitimately sits behind the leader at quiesce. Re-enable equality once
 //! message repair lands (the state-sync workstream).
 
-use std::collections::BTreeSet;
-
-use consensus::{MetadataHandle, Status};
-use metadata::impls::metadata::StreamsFrontend;
-
 use crate::Simulator;
 use crate::replica::Replica;
 use crate::workload::shadow::Shadow;
 use crate::workload::{Workload, apply_sim_commands};
+use consensus::{MetadataHandle, Status};
+use metadata::impls::metadata::StreamsFrontend;
+use std::collections::BTreeSet;
 
 /// Prefix every workload-generated entity name carries (see
 /// [`Shadow::fresh_name`]). The entity oracle filters committed state to these

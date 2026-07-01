@@ -713,7 +713,7 @@ mod tests {
         // shifts the trace. Re-lock on intentional changes; expect re-locks until
         // error discriminants and reply bodies stabilize the wire format.
         assert_eq!(
-            h1, 0xD0D0_4053_E96A_4CBA,
+            h1, 0xFF7F_E659_B9D8_15E9,
             "workload reply hash drifted from locked baseline"
         );
     }

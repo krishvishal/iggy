@@ -29,8 +29,11 @@
 //!
 //! The default workload is partition-plane (`SendMessages`): it drains and
 //! converges. Metadata and mixed-plane workloads are gated on the metadata
-//! request-gap bug (`metadata-request-gap-bug.md`); broader op coverage lands
-//! once that is fixed.
+//! request-gap: a client's replicated-metadata request ids must arrive
+//! contiguously (`committed + 1`), so a dropped or reordered metadata request
+//! opens a permanent `RequestGap` that wedges that client's metadata plane.
+//! Broader op coverage lands once the workload generator models that
+//! constraint.
 
 use clap::Parser;
 use iggy_common::IggyByteSize;
@@ -144,7 +147,7 @@ fn main() {
         } else {
             println!(
                 "WARN: did not quiesce within budget — expected when crashing to bare quorum \
-                 or under the metadata request-gap bug; per-tick invariants still held"
+                 or under the metadata request-gap limitation; per-tick invariants still held"
             );
         }
     }
