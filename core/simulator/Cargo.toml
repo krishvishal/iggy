@@ -22,6 +22,10 @@ edition = "2024"
 license = "Apache-2.0"
 publish = false
 
+[[bin]]
+name = "workload-fuzz"
+path = "src/workload_fuzz.rs"
+
 [dependencies]
 bytemuck = { workspace = true }
 bytes = { workspace = true }
