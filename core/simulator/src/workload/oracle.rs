@@ -74,33 +74,15 @@ struct CommittedMetadata {
 impl CommittedMetadata {
     /// Restrict to workload-generated entities (see [`WORKLOAD_PREFIX`]), so the
     /// entity oracle compares like with like against the shadow.
-    fn workload_owned(&self) -> Self {
-        Self {
-            streams: self
-                .streams
-                .iter()
-                .filter(|name| name.starts_with(WORKLOAD_PREFIX))
-                .cloned()
-                .collect(),
-            topics: self
-                .topics
-                .iter()
-                .filter(|(stream, _)| stream.starts_with(WORKLOAD_PREFIX))
-                .cloned()
-                .collect(),
-            users: self
-                .users
-                .iter()
-                .filter(|name| name.starts_with(WORKLOAD_PREFIX))
-                .cloned()
-                .collect(),
-            consumer_groups: self
-                .consumer_groups
-                .iter()
-                .filter(|(stream, _, _)| stream.starts_with(WORKLOAD_PREFIX))
-                .cloned()
-                .collect(),
-        }
+    fn workload_owned(mut self) -> Self {
+        self.streams
+            .retain(|name| name.starts_with(WORKLOAD_PREFIX));
+        self.topics
+            .retain(|(stream, _)| stream.starts_with(WORKLOAD_PREFIX));
+        self.users.retain(|name| name.starts_with(WORKLOAD_PREFIX));
+        self.consumer_groups
+            .retain(|(stream, _, _)| stream.starts_with(WORKLOAD_PREFIX));
+        self
     }
 }
 
@@ -184,8 +166,9 @@ pub fn assert_converged(sim: &Simulator, workload: &Workload) {
     // Entity oracle: on a serial run the shadow must equal the committed
     // metadata on the leader, the authoritative holder of the metadata log.
     if workload.strict_outcome_oracle() {
-        let leader = metadata_leader(sim, &live)
-            .unwrap_or_else(|| panic!("no metadata leader live at quiesce (seed={seed:#x})"));
+        let Some(leader) = metadata_leader(sim, &live) else {
+            panic!("no metadata leader live at quiesce (seed={seed:#x})");
+        };
         let committed = read_committed_metadata(&sim.replicas[leader]).workload_owned();
         assert_eq!(
             shadow_metadata(&workload.shadow),

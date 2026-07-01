@@ -95,7 +95,7 @@ pub struct WorkloadOptions {
     /// Probability per tick that the driver crashes one live non-primary
     /// replica (crash-only, no restart). `0.0` disables injection: the fault
     /// PRNG draws nothing, so traffic stays bit-identical.
-    pub crash_per_tick_prob: f32,
+    pub crash_per_tick_ratio: f32,
     /// Floor on live replicas the driver will not crash below, preserving a
     /// commit quorum. Defaults to `replica_count / 2 + 1`.
     pub min_survivors: u8,
@@ -117,7 +117,7 @@ impl WorkloadOptions {
             invalid_request_ratio: 0.0,
             consumer_pool_size: 4,
             max_offset: 1_000_000,
-            crash_per_tick_prob: 0.0,
+            crash_per_tick_ratio: 0.0,
             min_survivors: replica_count / 2 + 1,
         }
     }

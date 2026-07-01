@@ -32,8 +32,7 @@
 //! request-gap bug (`metadata-request-gap-bug.md`); broader op coverage lands
 //! once that is fixed.
 
-use std::str::FromStr;
-
+use clap::Parser;
 use iggy_common::IggyByteSize;
 use server_common::sharding::IggyNamespace;
 use server_common::{MemoryPool, MemoryPoolConfigOther};
@@ -45,32 +44,47 @@ use simulator::workload::options::{ActionWeights, WorkloadOptions};
 use simulator::workload::{Workload, oracle, run};
 use strum::IntoEnumIterator;
 
-/// Parse `--name value` from the argument list, falling back to `default`.
-fn arg_or<T: FromStr>(args: &[String], name: &str, default: T) -> T {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
+#[derive(Parser)]
+#[command(about = "Deterministic workload fuzzer for the Iggy simulator")]
+struct Args {
+    /// Omitted draws a random seed (logged for replay).
+    #[arg(long)]
+    seed: Option<u64>,
+    #[arg(long, default_value_t = 10_000)]
+    ticks: u64,
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..))]
+    clients: u8,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(1..))]
+    replicas: u8,
+    #[arg(long, default_value_t = 0.0, value_parser = parse_unit_interval)]
+    crash_prob: f32,
+    #[arg(long)]
+    no_quiesce: bool,
+}
+
+/// Clap value parser: accept a probability in `[0.0, 1.0]`.
+fn parse_unit_interval(raw: &str) -> Result<f32, String> {
+    let value: f32 = raw
+        .parse()
+        .map_err(|_| format!("`{raw}` is not a number"))?;
+    if (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("must be within [0.0, 1.0], got {value}"))
+    }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let args = Args::parse();
 
     // A provided seed reproduces a prior run exactly; otherwise draw one and
     // log it. Both the network and workload PRNGs derive from it.
-    let seed: u64 = args
-        .iter()
-        .position(|a| a == "--seed")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(rand::random);
-
-    let ticks: u64 = arg_or(&args, "--ticks", 10_000);
-    let clients: u8 = arg_or(&args, "--clients", 1);
-    let replicas: u8 = arg_or(&args, "--replicas", 3);
-    let crash_prob: f32 = arg_or(&args, "--crash-prob", 0.0);
-    let quiesce = !args.iter().any(|a| a == "--no-quiesce");
+    let seed = args.seed.unwrap_or_else(rand::random);
+    let ticks = args.ticks;
+    let clients = args.clients;
+    let replicas = args.replicas;
+    let crash_prob = args.crash_prob;
+    let quiesce = !args.no_quiesce;
 
     // Surface the seed on any panic (invariant or oracle violation) so the run
     // is replayable. The process still exits non-zero via the default hook.
@@ -113,7 +127,7 @@ fn main() {
 
     let mut options = WorkloadOptions::new(seed, replicas, vec![ns]);
     options.client_count = clients;
-    options.crash_per_tick_prob = crash_prob;
+    options.crash_per_tick_ratio = crash_prob;
     options.weights = ActionWeights::new(&[(Action::SendMessages, 100)]);
     let mut workload = Workload::new(options);
 

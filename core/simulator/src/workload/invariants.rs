@@ -95,8 +95,9 @@ impl Invariants {
 
     /// Number of `(replica, namespace)` pairs observed so far. Used by tests to
     /// prove the checks ran over live state rather than vacuously.
+    #[cfg(test)]
     #[must_use]
-    pub fn tracked_pairs(&self) -> usize {
+    pub(crate) fn tracked_pairs(&self) -> usize {
         self.commit_offset.len()
     }
 }

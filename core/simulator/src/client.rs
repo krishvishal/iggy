@@ -450,7 +450,7 @@ impl SimClient {
         let batch = SendMessages2Owned::from_messages(namespace, &batch)
             .expect("simulator must build a valid send_messages2 batch");
         let total_size = std::mem::size_of::<RequestHeader>() + batch.header.total_size();
-        let request_header = self.request_header(Operation::SendMessages, namespace, total_size);
+        let request_header = self.header(Operation::SendMessages, namespace.inner(), total_size);
         batch
             .encode_request(request_header)
             .expect("simulator must build a valid send_messages2 request")
@@ -555,7 +555,6 @@ impl SimClient {
         )
     }
 
-    #[allow(clippy::cast_possible_truncation)]
     fn build_request_with_namespace(
         &self,
         operation: Operation,
@@ -565,7 +564,22 @@ impl SimClient {
         let header_size = std::mem::size_of::<RequestHeader>();
         let total_size = header_size + payload.len();
 
-        let header = self.request_header(operation, namespace, total_size);
+        let header = self.header(operation, namespace.inner(), total_size);
+
+        let header_bytes = bytemuck::bytes_of(&header);
+        let mut buffer = Vec::with_capacity(total_size);
+        buffer.extend_from_slice(header_bytes);
+        buffer.extend_from_slice(payload);
+
+        Message::try_from(Owned::<4096>::copy_from_slice(&buffer))
+            .expect("request buffer must contain a valid request message")
+    }
+
+    fn build_request(&self, operation: Operation, payload: &[u8]) -> Message<RequestHeader> {
+        let header_size = std::mem::size_of::<RequestHeader>();
+        let total_size = header_size + payload.len();
+
+        let header = self.header(operation, 0, total_size);
 
         let header_bytes = bytemuck::bytes_of(&header);
         let mut buffer = Vec::with_capacity(total_size);
@@ -577,11 +591,8 @@ impl SimClient {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn build_request(&self, operation: Operation, payload: &[u8]) -> Message<RequestHeader> {
-        let header_size = std::mem::size_of::<RequestHeader>();
-        let total_size = header_size + payload.len();
-
-        let header = RequestHeader {
+    fn header(&self, operation: Operation, namespace: u64, total_size: usize) -> RequestHeader {
+        RequestHeader {
             command: iggy_binary_protocol::Command2::Request,
             operation,
             size: total_size as u32,
@@ -597,42 +608,7 @@ impl SimClient {
             timestamp: 0, // TODO: Use actual timestamp
             session: self.session_id(),
             request: self.request_id_for(operation),
-            ..Default::default()
-        };
-
-        let header_bytes = bytemuck::bytes_of(&header);
-        let mut buffer = Vec::with_capacity(total_size);
-        buffer.extend_from_slice(header_bytes);
-        buffer.extend_from_slice(payload);
-
-        Message::try_from(Owned::<4096>::copy_from_slice(&buffer))
-            .expect("request buffer must contain a valid request message")
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    fn request_header(
-        &self,
-        operation: Operation,
-        namespace: IggyNamespace,
-        total_size: usize,
-    ) -> RequestHeader {
-        RequestHeader {
-            command: iggy_binary_protocol::Command2::Request,
-            operation,
-            size: total_size as u32,
-            cluster: 0,
-            checksum: 0,
-            checksum_body: 0,
-            view: 0,
-            release: 0,
-            replica: 0,
-            reserved_frame: [0; 66],
-            client: self.client_id,
-            request_checksum: 0,
-            timestamp: 0,
-            session: self.session_id(),
-            request: self.request_id_for(operation),
-            namespace: namespace.inner(),
+            namespace,
             ..Default::default()
         }
     }

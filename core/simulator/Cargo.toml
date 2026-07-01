@@ -29,6 +29,7 @@ path = "src/workload_fuzz.rs"
 [dependencies]
 bytemuck = { workspace = true }
 bytes = { workspace = true }
+clap = { workspace = true }
 consensus = { path = "../consensus" }
 enumset = { workspace = true }
 futures = { workspace = true }

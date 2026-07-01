@@ -112,7 +112,7 @@ impl Workload {
     /// Total in-flight requests across all clients. Read by the
     /// [`Invariants`]; draws no PRNG.
     #[must_use]
-    pub fn total_in_flight(&self) -> usize {
+    pub(crate) fn total_in_flight(&self) -> usize {
         self.in_flight_per_client.values().copied().sum()
     }
 
@@ -120,7 +120,7 @@ impl Workload {
     /// Fixtures set `client_count` to the number of driven clients, the same
     /// coupling `strict_outcome_oracle` relies on.
     #[must_use]
-    pub fn in_flight_bound(&self) -> usize {
+    pub(crate) fn in_flight_bound(&self) -> usize {
         usize::from(self.options.client_count) * CLIENT_REQUEST_QUEUE_MAX
     }
 
@@ -129,7 +129,7 @@ impl Workload {
     /// quiesce-time entity oracle the same way it gates the per-op equality
     /// oracle.
     #[must_use]
-    pub const fn strict_outcome_oracle(&self) -> bool {
+    pub(crate) const fn strict_outcome_oracle(&self) -> bool {
         self.strict_outcome_oracle
     }
 
@@ -361,7 +361,7 @@ const FAULT_SEED_SALT: u64 = 0x5A1A_F0E5_FACE_0001;
 ///
 /// The invariants are asserted after every tick, so a consensus or
 /// workload regression panics at the tick it occurs (the seed in the message
-/// replays it). When `crash_per_tick_prob > 0` the driver also injects
+/// replays it). When `crash_per_tick_ratio > 0` the driver also injects
 /// crash-only faults via [`maybe_inject_crash`].
 pub fn run(
     sim: &mut Simulator,
@@ -374,7 +374,7 @@ pub fn run(
     let mut fault_prng = Xoshiro256Plus::seed_from_u64(workload.options.seed ^ FAULT_SEED_SALT);
     let mut replies_seen = 0u64;
     for _ in 0..tick_budget {
-        if workload.options.crash_per_tick_prob > 0.0 {
+        if workload.options.crash_per_tick_ratio > 0.0 {
             maybe_inject_crash(sim, workload, &mut fault_prng);
         }
         for client in clients {
@@ -395,7 +395,7 @@ pub fn run(
     replies_seen
 }
 
-/// With probability `crash_per_tick_prob`, crash one live non-primary replica,
+/// With probability `crash_per_tick_ratio`, crash one live non-primary replica,
 /// provided doing so leaves at least `min_survivors` live. Crash-only: a
 /// crashed replica is never restarted (that needs consensus durability).
 ///
@@ -411,7 +411,7 @@ fn maybe_inject_crash(sim: &mut Simulator, workload: &Workload, prng: &mut Xoshi
         return;
     }
     let roll: f32 = prng.random();
-    if roll >= workload.options.crash_per_tick_prob {
+    if roll >= workload.options.crash_per_tick_ratio {
         return;
     }
     let primaries: HashSet<u8> = workload

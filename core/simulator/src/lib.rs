@@ -343,7 +343,11 @@ impl Simulator {
     /// Consensus view for a replica's partition-plane group, or `None` if the
     /// namespace is not present on that replica.
     #[must_use]
-    pub fn consensus_view(&self, replica_idx: usize, namespace: IggyNamespace) -> Option<u64> {
+    pub(crate) fn consensus_view(
+        &self,
+        replica_idx: usize,
+        namespace: IggyNamespace,
+    ) -> Option<u64> {
         let replica = &self.replicas[replica_idx];
         let partition = replica.plane.partitions().get_by_ns(&namespace)?;
         Some(u64::from(partition.consensus().view()))
@@ -352,21 +356,17 @@ impl Simulator {
     /// Index of the current primary for `namespace`, as seen by the first live
     /// replica hosting it, or `None` if no live replica hosts it.
     #[must_use]
-    pub fn primary_index(&self, namespace: IggyNamespace) -> Option<u8> {
-        for replica_idx in 0..self.replica_count {
-            if self.crashed.contains(&replica_idx) {
-                continue;
-            }
-            if let Some(partition) = self.replicas[replica_idx as usize]
-                .plane
-                .partitions()
-                .get_by_ns(&namespace)
-            {
+    pub(crate) fn primary_index(&self, namespace: IggyNamespace) -> Option<u8> {
+        (0..self.replica_count)
+            .filter(|replica_idx| !self.crashed.contains(replica_idx))
+            .find_map(|replica_idx| {
+                let partition = self.replicas[usize::from(replica_idx)]
+                    .plane
+                    .partitions()
+                    .get_by_ns(&namespace)?;
                 let consensus = partition.consensus();
-                return Some(consensus.primary_index(consensus.view()));
-            }
-        }
-        None
+                Some(consensus.primary_index(consensus.view()))
+            })
     }
 
     fn dispatch_to_replica(replica: &Replica, message: Message<GenericHeader>) {
@@ -813,7 +813,7 @@ mod tests {
             ..packet::PacketSimulatorOptions::default()
         };
         let mut sim = Simulator::new(
-            replica_count as usize,
+            usize::from(replica_count),
             std::iter::once(client_id),
             network_opts,
         );
@@ -876,7 +876,7 @@ mod tests {
             ..packet::PacketSimulatorOptions::default()
         };
         let mut sim = Simulator::new(
-            replica_count as usize,
+            usize::from(replica_count),
             std::iter::once(client_id),
             network_opts,
         );
@@ -887,7 +887,7 @@ mod tests {
 
         let mut options = WorkloadOptions::new(0xC0FF_EE00, replica_count, vec![ns_a]);
         options.weights = ActionWeights::new(&[(Action::SendMessages, 100)]);
-        options.crash_per_tick_prob = 0.05;
+        options.crash_per_tick_ratio = 0.05;
         options.min_survivors = 3; // quorum of 5
 
         let mut wl = Workload::new(options);
@@ -1024,7 +1024,7 @@ mod tests {
         // so commits still reach quorum and the run drains.
         let mut options = WorkloadOptions::new(0xC0FF_EE00, replica_count, vec![ns_a]);
         options.weights = ActionWeights::new(&[(Action::SendMessages, 100)]);
-        options.crash_per_tick_prob = 0.05;
+        options.crash_per_tick_ratio = 0.05;
         options.min_survivors = 4;
         let mut wl = Workload::new(options);
 
