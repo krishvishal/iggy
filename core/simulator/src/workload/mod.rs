@@ -396,10 +396,18 @@ pub fn run(
 /// provided doing so leaves at least `min_survivors` live. Crash-only: a
 /// crashed replica is never restarted (that needs consensus durability).
 ///
-/// Primaries are spared because the driver has no request-timeout/resend path:
-/// a request lost to a crashed primary would wedge the client's only in-flight
-/// slot. Forcing primary crashes (and the view change they trigger) while
-/// keeping traffic flowing is future work gated on that resend path.
+/// "Non-primary" is partition-plane only: the exclusion set comes from
+/// `Simulator::primary_index`, which reads `partitions()`. The metadata-plane
+/// primary is not consulted; it is spared only by co-location, since every group
+/// starts at view 0 with `primary = view % replica_count` (so replica 0 leads
+/// both planes) and `min_survivors` keeps a commit quorum, so no view change
+/// moves it. Were the two planes' primaries to diverge, the metadata primary
+/// could be crashed.
+///
+/// Primaries are spared at all because the driver has no request-timeout/resend
+/// path: a request lost to a crashed primary would wedge the client's only
+/// in-flight slot. Forcing primary crashes (and the view change they trigger)
+/// while keeping traffic flowing is future work gated on that resend path.
 fn maybe_inject_crash(sim: &mut Simulator, workload: &Workload, prng: &mut Xoshiro256Plus) {
     let live: Vec<u8> = (0..sim.replica_count)
         .filter(|replica_idx| !sim.is_crashed(*replica_idx))

@@ -123,6 +123,19 @@ pub fn drive_to_quiesce(sim: &mut Simulator, workload: &mut Workload, max_ticks:
 /// the shadow equals the metadata committed on the leader. See the module docs
 /// for why full cross-replica equality is deferred.
 ///
+/// Assumes one stable primary that every live replica agrees on: the leader is
+/// `Simulator::primary_index` (a single replica's view), and both checks treat
+/// it as the authoritative, most-advanced log. Sound today because the driver
+/// spares primaries from crashes, so no view change runs mid-test. Once
+/// primary-crash injection lands, live replicas can hold different views and
+/// this breaks: it may pick a stale or crashed leader (a correctly-ahead new
+/// primary then trips "exceeds leader"), or find no `Normal` primary mid-view
+/// change (`metadata_leader` returns `None`). Both are false failures. Fix
+/// then: resolve the leader by highest `(view, commit_offset)`, or quiesce
+/// until live replicas reconverge to one view before asserting. Crash injection
+/// already runs but spares primaries (`maybe_inject_crash`); this is deferred
+/// until primary-crash injection lands, itself gated on a request-resend path.
+///
 /// # Panics
 /// If a replica is ahead of the leader or the shadow mismatches the leader. The
 /// workload seed is in the message so the failing run replays deterministically.

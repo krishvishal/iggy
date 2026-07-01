@@ -355,6 +355,13 @@ impl Simulator {
 
     /// Index of the current primary for `namespace`, as seen by the first live
     /// replica hosting it, or `None` if no live replica hosts it.
+    ///
+    /// Reads one replica's view, so it assumes live replicas agree on the
+    /// primary. Sound only while the primary is static, which holds today: the
+    /// driver spares primaries from crashes, so no crash-triggered view change
+    /// runs mid-test. Once primary-crash injection lands, views can diverge and
+    /// this may name a stale or crashed primary (see
+    /// `workload::oracle::assert_converged` for the consequence and fix).
     #[must_use]
     pub(crate) fn primary_index(&self, namespace: IggyNamespace) -> Option<u8> {
         (0..self.replica_count)
